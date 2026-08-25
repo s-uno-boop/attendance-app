@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TimeFlow - 出退勤管理システム</title>
+  <meta name="description" content="ブラウザで軽快に動作するモダンで高機能な出退勤管理Webアプリケーション">
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 背景装飾グラデーションオーブ -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+  <div class="bg-glow bg-glow-3"></div>
+
+  <div class="app-container">
+    <!-- ヘッダー -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1 class="app-title">TimeFlow</h1>
+          <span class="app-subtitle">Attendance Management System</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <!-- クラウド同期状態バッジ -->
+        <div id="cloud-status-badge" class="cloud-status-badge" title="Googleスプレッドシート連携状態">
+          <span class="cloud-status-dot"></span>
+          <span id="cloud-status-text">ローカル保存</span>
+        </div>
+        <!-- 管理者メニューボタン -->
+        <button id="btn-open-admin-login" class="btn-admin-link" title="管理者画面を開く（パスワードが必要）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          <span>管理者メニュー</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- メインコンテンツ（一般打刻画面） -->
+    <main class="main-content">
+      <!-- 上段：時計＆打刻セクション -->
+      <section class="clock-punch-section">
+        <!-- ライブ時計カード -->
+        <div class="card glass-card clock-card">
+          <div class="clock-header">
+            <div class="current-date-box">
+              <span id="current-date" class="date-text">2026年8月25日</span>
+              <span id="current-day" class="day-badge">火曜日</span>
+            </div>
+            <div class="status-indicator-box">
+              <span class="status-dot" id="status-dot"></span>
+              <span id="current-status-text" class="status-text">未出勤</span>
+            </div>
+          </div>
+          
+          <div class="digital-clock-wrap">
+            <div id="digital-clock" class="digital-clock">00:00:00</div>
+          </div>
+
+          <!-- 打刻時入力エリア（名前＆メモ） -->
+          <div class="punch-inputs-container">
+            <div class="input-field-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+              <input type="text" id="user-name" list="user-name-list" placeholder="お名前を入力または選択" maxlength="20" autocomplete="off">
+              <datalist id="user-name-list">
+                <!-- JavaScriptで動的生成 -->
+              </datalist>
+            </div>
+            <div class="input-field-wrap">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              <input type="text" id="punch-note" placeholder="打刻メモ（例: 在宅勤務、外出、客先直行など）" maxlength="40">
+            </div>
+          </div>
+        </div>
+
+        <!-- 打刻ボタン群 -->
+        <div class="punch-buttons-grid">
+          <!-- 出勤ボタン -->
+          <button id="btn-clock-in" class="punch-btn btn-clock-in" data-type="clock_in">
+            <div class="btn-content">
+              <div class="btn-icon-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                  <polyline points="10 17 15 12 10 7"></polyline>
+                  <line x1="15" y1="12" x2="3" y2="12"></line>
+                </svg>
+              </div>
+              <div class="btn-label-wrap">
+                <span class="btn-main-label">出勤</span>
+                <span class="btn-sub-label">Clock In</span>
+              </div>
+            </div>
+            <div class="btn-glow-layer"></div>
+          </button>
+
+          <!-- 退勤ボタン -->
+          <button id="btn-clock-out" class="punch-btn btn-clock-out" data-type="clock_out">
+            <div class="btn-content">
+              <div class="btn-icon-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+              </div>
+              <div class="btn-label-wrap">
+                <span class="btn-main-label">退勤</span>
+                <span class="btn-sub-label">Clock Out</span>
+              </div>
+            </div>
+            <div class="btn-glow-layer"></div>
+          </button>
+        </div>
+      </section>
+
+      <!-- 中段：本日のサマリーカード -->
+      <section class="summary-section">
+        <div class="card glass-card summary-card">
+          <div class="summary-item">
+            <div class="summary-icon icon-in">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            </div>
+            <div class="summary-info">
+              <span class="summary-title">出勤時刻</span>
+              <span id="summary-clock-in" class="summary-value">--:--</span>
+            </div>
+          </div>
+
+          <div class="summary-divider"></div>
+
+          <div class="summary-item">
+            <div class="summary-icon icon-out">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            </div>
+            <div class="summary-info">
+              <span class="summary-title">退勤時刻</span>
+              <span id="summary-clock-out" class="summary-value">--:--</span>
+            </div>
+          </div>
+
+          <div class="summary-divider"></div>
+
+          <div class="summary-item">
+            <div class="summary-icon icon-work">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>
+            </div>
+            <div class="summary-info">
+              <span class="summary-title">実労働時間</span>
+              <span id="summary-work-time" class="summary-value highlight-text">0時間 0分</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 下段：一般閲覧用 記録一覧テーブル -->
+      <section class="records-section">
+        <div class="card glass-card records-card">
+          <div class="records-header">
+            <div class="records-title-wrap">
+              <h2 class="records-heading">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                打刻ログ一覧
+              </h2>
+              <span id="records-count-badge" class="badge">0件</span>
+            </div>
+
+            <!-- フィルタ（一般画面：閲覧用） -->
+            <div class="records-controls">
+              <div class="filter-group">
+                <label for="filter-user" class="filter-label">名前:</label>
+                <select id="filter-user" class="custom-select">
+                  <option value="all">全員</option>
+                </select>
+              </div>
+
+              <div class="filter-group">
+                <label for="filter-period" class="filter-label">期間:</label>
+                <select id="filter-period" class="custom-select">
+                  <option value="all">全期間</option>
+                  <option value="today" selected>今日</option>
+                  <option value="week">直近7日間</option>
+                  <option value="month">今月</option>
+                </select>
+              </div>
+
+              <div class="filter-group">
+                <label for="filter-type" class="filter-label">種別:</label>
+                <select id="filter-type" class="custom-select">
+                  <option value="all">すべて</option>
+                  <option value="clock_in">出勤</option>
+                  <option value="clock_out">退勤</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- テーブルコンテナ（一般画面：削除ボタンなし） -->
+          <div class="table-responsive">
+            <table class="records-table">
+              <thead>
+                <tr>
+                  <th style="min-width: 110px;">名前</th>
+                  <th style="min-width: 105px;">日付</th>
+                  <th style="min-width: 85px;">時刻</th>
+                  <th style="min-width: 90px;">打刻種別</th>
+                  <th style="min-width: 150px;">メモ・備考</th>
+                  <th style="min-width: 115px;">実労働時間</th>
+                  <th style="min-width: 120px;">タイムスタンプ</th>
+                </tr>
+              </thead>
+              <tbody id="records-tbody">
+                <!-- JavaScriptで動的生成 -->
+              </tbody>
+            </table>
+
+            <!-- 空データ時プレースホルダー -->
+            <div id="empty-state" class="empty-state">
+              <div class="empty-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+              </div>
+              <p class="empty-title">打刻記録がありません</p>
+              <p class="empty-sub">上記のボタンから出勤・退勤の打刻を行ってください</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- フッター -->
+    <footer class="app-footer">
+      <p>© 2026 TimeFlow Attendance System. Protected by Administrator Control.</p>
+    </footer>
+  </div>
+
+  <!-- ==========================================
+       管理者ログイン認証モーダル
+       ========================================== -->
+  <div id="admin-login-modal" class="modal-overlay hidden">
+    <div class="modal-card admin-auth-card">
+      <div class="modal-icon-wrap auth-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+      </div>
+      <h3 class="modal-title">管理者認証</h3>
+      <p class="modal-message">管理者PINコードを入力してください。<br><small style="color: var(--text-muted);">（初期PIN: 1234）</small></p>
+      
+      <div class="pin-input-wrap">
+        <input type="password" id="admin-pin-input" maxlength="8" placeholder="PINコード" autocomplete="off">
+      </div>
+      <div id="admin-login-error" class="auth-error-msg hidden">PINコードが正しくありません</div>
+
+      <div class="modal-actions">
+        <button id="admin-login-cancel-btn" class="btn-ghost">キャンセル</button>
+        <button id="admin-login-submit-btn" class="btn-primary">ログイン</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       管理者専用ダッシュボードモーダル
+       ========================================== -->
+  <div id="admin-panel-modal" class="modal-overlay admin-overlay hidden">
+    <div class="admin-panel-card glass-card">
+      <!-- パネルヘッダー -->
+      <div class="admin-panel-header">
+        <div class="admin-panel-title-wrap">
+          <div class="admin-badge-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          </div>
+          <div>
+            <h2 class="admin-panel-title">管理者専用コントロールパネル</h2>
+            <span class="admin-panel-sub">データ管理・編集・CSV出力・スタッフ設定</span>
+          </div>
+        </div>
+        <button id="admin-panel-close-btn" class="btn-ghost btn-close-admin" title="管理画面を閉じる">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          <span>閉じる</span>
+        </button>
+      </div>
+
+      <!-- パネルナビゲーションタブ -->
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-tab="data-mgmt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+          <span>勤怠データ編集・削除</span>
+        </button>
+        <button class="admin-tab" data-tab="staff-mgmt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span>スタッフリスト管理</span>
+        </button>
+        <button class="admin-tab" data-tab="security-mgmt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span>セキュリティ設定</span>
+        </button>
+        <button class="admin-tab" data-tab="cloud-mgmt">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path></svg>
+          <span>☁ Google連携設定</span>
+        </button>
+      </div>
+
+      <!-- タブ1: 勤怠データ管理 -->
+      <div id="tab-data-mgmt" class="admin-tab-content active">
+        <div class="admin-toolbar">
+          <div class="admin-toolbar-filters">
+            <div class="filter-group">
+              <label for="admin-filter-user" class="filter-label">名前:</label>
+              <select id="admin-filter-user" class="custom-select">
+                <option value="all">全員</option>
+              </select>
+            </div>
+            <div class="filter-group">
+              <label for="admin-filter-period" class="filter-label">期間:</label>
+              <select id="admin-filter-period" class="custom-select">
+                <option value="all">全期間</option>
+                <option value="today">今日</option>
+                <option value="week">直近7日間</option>
+                <option value="month">今月</option>
+              </select>
+            </div>
+          </div>
+          <div class="admin-toolbar-actions">
+            <button id="btn-manual-add" class="btn-primary" title="打刻漏れや事後打刻を手動登録">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              <span>＋ 打刻手動追加</span>
+            </button>
+            <button id="btn-sample-data" class="btn-ghost" title="テスト用サンプルデータを投入">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+              <span>サンプル挿入</span>
+            </button>
+            <button id="btn-export-csv" class="btn-secondary" title="勤怠記録をCSV形式でダウンロード">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>CSVエクスポート</span>
+            </button>
+            <button id="btn-clear-all" class="btn-danger-outline" title="全データを削除してリセット">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              <span>全削除</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive admin-table-wrap">
+          <table class="records-table">
+            <thead>
+              <tr>
+                <th style="min-width: 110px;">名前</th>
+                <th style="min-width: 105px;">日付</th>
+                <th style="min-width: 85px;">時刻</th>
+                <th style="min-width: 90px;">打刻種別</th>
+                <th style="min-width: 150px;">メモ・備考</th>
+                <th style="min-width: 115px;">実労働時間</th>
+                <th style="min-width: 120px;">タイムスタンプ</th>
+                <th style="min-width: 95px; text-align: center;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="admin-records-tbody">
+              <!-- JavaScriptで動的生成 -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- タブ2: スタッフリスト管理 -->
+      <div id="tab-staff-mgmt" class="admin-tab-content">
+        <div class="admin-card-section">
+          <h3 class="admin-section-heading">スタッフ名の登録・編集</h3>
+          <p class="admin-section-desc">ここで登録したスタッフ名は、打刻画面の名前ドロップダウン候補として表示されます。</p>
+          
+          <div class="staff-add-box">
+            <input type="text" id="staff-name-input" placeholder="スタッフ名を入力（例: 高橋 健太）" maxlength="20">
+            <button id="btn-add-staff" class="btn-primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+              <span>追加する</span>
+            </button>
+          </div>
+
+          <div class="staff-list-container">
+            <h4 class="staff-list-title">登録中のスタッフ一覧</h4>
+            <div id="staff-chips-wrap" class="staff-chips-wrap">
+              <!-- JavaScriptで生成 -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- タブ3: セキュリティ設定（PIN変更） -->
+      <div id="tab-security-mgmt" class="admin-tab-content">
+        <div class="admin-card-section" style="max-width: 480px;">
+          <h3 class="admin-section-heading">管理者PINコードの変更</h3>
+          <p class="admin-section-desc">管理画面を開く際のパスワード（4〜8桁の数字等）を変更できます。</p>
+          
+          <div class="pin-change-form">
+            <div class="form-group">
+              <label for="current-pin-input">現在のPINコード:</label>
+              <input type="password" id="current-pin-input" maxlength="8" placeholder="現在のPIN">
+            </div>
+            <div class="form-group">
+              <label for="new-pin-input">新しいPINコード:</label>
+              <input type="password" id="new-pin-input" maxlength="8" placeholder="新しいPIN（4〜8文字）">
+            </div>
+            <div class="form-group">
+              <label for="confirm-pin-input">新しいPINコード（確認）:</label>
+              <input type="password" id="confirm-pin-input" maxlength="8" placeholder="再入力">
+            </div>
+            <button id="btn-change-pin" class="btn-primary" style="margin-top: 8px;">
+              <span>PINコードを更新</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- タブ4: クラウド・Googleスプレッドシート連携設定 -->
+      <div id="tab-cloud-mgmt" class="admin-tab-content">
+        <div class="admin-card-section" style="max-width: 680px;">
+          <h3 class="admin-section-heading">Googleスプレッドシート（GAS）連携</h3>
+          <p class="admin-section-desc">各自の端末・ブラウザから打刻したデータを、共通のGoogleスプレッドシートへ自動同期・一元管理します。</p>
+          
+          <div class="cloud-config-box">
+            <div class="form-group">
+              <label for="gas-api-url">Google Apps Script (GAS) Web API URL:</label>
+              <input type="url" id="gas-api-url" placeholder="https://script.google.com/macros/s/.../exec">
+              <span style="font-size: 11px; color: var(--text-muted);">※GASの「デプロイ > ウェブアプリ」で発行されたURLを貼り付けてください</span>
+            </div>
+
+            <div class="form-group" style="margin-top: 8px;">
+              <label for="gas-sheet-url">スプレッドシートのURL（閲覧用ショートカット・任意）:</label>
+              <div class="input-with-action">
+                <input type="url" id="gas-sheet-url" placeholder="https://docs.google.com/spreadsheets/d/.../edit">
+                <a id="btn-open-sheet" href="#" target="_blank" class="btn-secondary btn-icon-only" title="スプレッドシートを開く" style="display: none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                </a>
+              </div>
+            </div>
+
+            <div class="cloud-actions-row">
+              <button id="btn-test-gas" class="btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                <span>接続テスト</span>
+              </button>
+              <button id="btn-save-gas" class="btn-primary">
+                <span>設定を保存</span>
+              </button>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid var(--border-card); margin: 20px 0;">
+
+            <div class="cloud-sync-tool-box">
+              <h4 style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">
+                ☁ 未送信データ・全履歴の一括アップロード
+              </h4>
+              <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                端末内の打刻履歴（LocalStorage）を、指定したスプレッドシートに一括転送します。オフライン時のデータ同期や初期データ移行にご活用ください。
+              </p>
+              <button id="btn-sync-all-gas" class="btn-secondary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                <span>全履歴をスプレッドシートへ同期</span>
+              </button>
+            </div>
+
+            <!-- GAS導入手順のヘルプアコーディオン/ガイド -->
+            <div class="cloud-guide-card">
+              <h5 style="font-size: 13px; font-weight: 700; color: var(--text-accent); margin-bottom: 6px;">
+                💡 Googleスプレッドシート連携の初期設定（3ステップ）
+              </h5>
+              <ol style="font-size: 12px; color: var(--text-secondary); padding-left: 18px; line-height: 1.7;">
+                <li>Googleドライブで新規スプレッドシートを作成し、メニュー「<strong>拡張機能 > Apps Script</strong>」を開きます。</li>
+                <li>プロジェクト内の「<code>Code.gs</code>」に、同梱のスクリプト内容を貼り付けて保存します。</li>
+                <li>右上の「<strong>デプロイ > 新しいデプロイ</strong>」を選び、種類「<strong>ウェブアプリ</strong>」を選択して、アクセスできるユーザーを「<strong>全員</strong>」にしてデプロイし、発行されたURLを上記に入力します。</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       打刻レコード手動追加モーダル (管理者専用)
+       ========================================== -->
+  <div id="manual-add-modal" class="modal-overlay hidden">
+    <div class="modal-card edit-card">
+      <div class="edit-modal-header">
+        <h3 class="modal-title">打刻レコードの手動登録</h3>
+        <p class="admin-section-desc">打刻漏れや事後申請などの勤怠データを手動で新規追加します。</p>
+      </div>
+      
+      <div class="edit-form">
+        <div class="form-group">
+          <label for="add-user-name">スタッフ名:</label>
+          <input type="text" id="add-user-name" list="user-name-list" placeholder="氏名を選択または入力" maxlength="20">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="add-date">日付 (YYYY/MM/DD):</label>
+            <input type="text" id="add-date" placeholder="2026/08/25" maxlength="10">
+          </div>
+          <div class="form-group">
+            <label for="add-time">時刻 (HH:mm:ss):</label>
+            <input type="text" id="add-time" placeholder="09:00:00" maxlength="8">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="add-type">打刻種別:</label>
+          <select id="add-type" class="custom-select" style="width: 100%;">
+            <option value="clock_in">出勤</option>
+            <option value="clock_out">退勤</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="add-note">メモ・登録理由:</label>
+          <input type="text" id="add-note" placeholder="例: 打刻忘れのため事後登録、直行直帰など" maxlength="40">
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="add-cancel-btn" class="btn-ghost">キャンセル</button>
+        <button id="add-save-btn" class="btn-primary">新規登録する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       レコード個別編集モーダル
+       ========================================== -->
+  <div id="edit-record-modal" class="modal-overlay hidden">
+    <div class="modal-card edit-card">
+      <div class="edit-modal-header">
+        <h3 class="modal-title">打刻レコードの編集</h3>
+        <p class="admin-section-desc">日時や打刻種別の修正を行います（自動で管理者修正タグが付与されます）。</p>
+      </div>
+      
+      <div class="edit-form">
+        <input type="hidden" id="edit-record-id">
+        <div class="form-group">
+          <label for="edit-user-name">名前:</label>
+          <input type="text" id="edit-user-name" maxlength="20">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="edit-date">日付 (YYYY/MM/DD):</label>
+            <input type="text" id="edit-date" placeholder="2026/08/25" maxlength="10">
+          </div>
+          <div class="form-group">
+            <label for="edit-time">時刻 (HH:mm:ss):</label>
+            <input type="text" id="edit-time" placeholder="09:00:00" maxlength="8">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="edit-type">打刻種別:</label>
+          <select id="edit-type" class="custom-select" style="width: 100%;">
+            <option value="clock_in">出勤</option>
+            <option value="clock_out">退勤</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-note">メモ・修正理由:</label>
+          <input type="text" id="edit-note" placeholder="例: 時刻誤打刻の修正など" maxlength="40">
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="edit-cancel-btn" class="btn-ghost">キャンセル</button>
+        <button id="edit-save-btn" class="btn-primary">変更を保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- トースト通知コンテナ -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- 汎用確認モーダル -->
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-icon-wrap" id="modal-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+      </div>
+      <h3 id="modal-title" class="modal-title">確認</h3>
+      <p id="modal-message" class="modal-message">本当に実行しますか？</p>
+      <div class="modal-actions">
+        <button id="modal-cancel-btn" class="btn-ghost">キャンセル</button>
+        <button id="modal-confirm-btn" class="btn-danger">実行する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- スクリプト -->
+  <script src="app.js"></script>
+</body>
+</html>
