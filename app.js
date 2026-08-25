@@ -314,7 +314,7 @@
   }
 
   /**
-   * 起動時・更新時にGASから最新データ（スタッフ一覧・管理者PIN・打刻全件）を一括完全取得 (getInitialData)
+   * 起動時・更新時にGASから最新データ（スタッフ一覧・管理者PIN・打刻全件）を一括完全取得 (doGet: getInitialData)
    */
   async function fetchInitialData(silent = false) {
     if (!gasApiUrl) return;
@@ -431,6 +431,31 @@
   }
 
   /**
+   * スタッフリストをスプレッドシートへ即時同期 (updateStaffList)
+   */
+  async function syncStaffListToGas() {
+    if (!gasApiUrl) return;
+    updateCloudStatusUI('syncing');
+    try {
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'updateStaffList',
+          staffList: staffList
+        }),
+        mode: 'no-cors'
+      });
+      updateCloudStatusUI();
+      console.log('Staff list synced to Google Sheet successfully');
+    } catch (err) {
+      console.error('Staff list sync error:', err);
+      updateCloudStatusUI();
+      showToast('スタッフリストのクラウド保存に失敗しました', 'warning');
+    }
+  }
+
+  /**
    * 全ローカルレコードをスプレッドシートへ一括同期
    */
   async function syncAllRecordsToGas() {
@@ -467,12 +492,20 @@
 
     // 2. スタッフマスター送信
     if (staffList.length > 0) {
-      await postToGas({ action: 'updateStaffList', staffList: staffList });
+      await syncStaffListToGas();
     }
 
     // 3. 管理者PIN送信
     if (adminPin) {
-      await postToGas({ action: 'updatePin', pin: adminPin, newPin: adminPin });
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'updatePin',
+          newPin: adminPin
+        }),
+        mode: 'no-cors'
+      });
     }
 
     // 4. 最新データを再取得
@@ -611,7 +644,7 @@
     }
   }
 
-  function addStaff(name) {
+  async function addStaff(name) {
     const trimmed = name.trim();
     if (!trimmed) {
       showToast('スタッフ名を入力してください', 'warning');
@@ -630,15 +663,15 @@
     dom.staffNameInput.value = '';
 
     // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存 (updateStaffList)
-    postToGas({ action: 'updateStaffList', staffList: staffList });
+    await syncStaffListToGas();
     showToast(`スタッフ「${trimmed}」を追加しました（☁ クラウド同期済）`, 'success');
   }
 
-  function removeStaff(name) {
+  async function removeStaff(name) {
     showConfirmModal(
       'スタッフの削除',
       `スタッフ「${name}」をリストから削除しますか？\n（※過去の打刻記録は保持されます）`,
-      () => {
+      async () => {
         staffList = staffList.filter(s => s !== name);
         saveLocalStaffList();
 
@@ -648,7 +681,7 @@
         updateSummary();
 
         // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存 (updateStaffList)
-        postToGas({ action: 'updateStaffList', staffList: staffList });
+        await syncStaffListToGas();
         showToast(`スタッフ「${name}」を削除しました（☁ クラウド同期済）`, 'info');
       }
     );
@@ -830,7 +863,7 @@
       staffList.push(userName);
       saveLocalStaffList();
       updateStaffUI();
-      postToGas({ action: 'updateStaffList', staffList: staffList });
+      syncStaffListToGas();
     }
 
     dom.punchNote.value = '';
@@ -1094,7 +1127,7 @@
       staffList.push(userName);
       saveLocalStaffList();
       updateStaffUI();
-      postToGas({ action: 'updateStaffList', staffList: staffList });
+      syncStaffListToGas();
     }
 
     updateStatusUI();
@@ -1432,7 +1465,10 @@
     renderGeneralRecords();
   }
 
-  function handlePinChange() {
+  /**
+   * PIN変更時のクラウド同期 (updatePin)
+   */
+  async function handlePinChange() {
     const curPin = dom.currentPinInput.value.trim();
     const newPin = dom.newPinInput.value.trim();
     const confPin = dom.confirmPinInput.value.trim();
@@ -1450,16 +1486,33 @@
       return;
     }
 
-    adminPin = newPin;
-    saveLocalAdminPin(newPin);
-    
-    // スプレッドシート側の「システム設定」シートへ即時上書き保存 (updatePin)
-    postToGas({ action: 'updatePin', pin: newPin, newPin: newPin });
+    updateCloudStatusUI('syncing');
 
-    dom.currentPinInput.value = '';
-    dom.newPinInput.value = '';
-    dom.confirmPinInput.value = '';
-    showToast('管理者PINコードを変更しました（☁ スプレッドシート「システム設定」に保存済）', 'success');
+    try {
+      // GASへ updatePin POSTリクエスト送信
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'updatePin',
+          newPin: newPin
+        }),
+        mode: 'no-cors'
+      });
+
+      adminPin = newPin;
+      saveLocalAdminPin(newPin);
+      updateCloudStatusUI();
+
+      dom.currentPinInput.value = '';
+      dom.newPinInput.value = '';
+      dom.confirmPinInput.value = '';
+      showToast('管理者PINコードを変更しました（☁ スプレッドシート「システム設定」に保存済）', 'success');
+    } catch (err) {
+      console.error('PIN update error:', err);
+      updateCloudStatusUI();
+      showToast('PIN変更のクラウド送信に失敗しました', 'error');
+    }
   }
 
   // ==========================================
@@ -1475,7 +1528,7 @@
     if (type === 'success' || type === 'toast-success') {
       iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
     } else if (type === 'warning' || type === 'toast-warning') {
-      iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+      iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
     } else if (type === 'error' || type === 'toast-error') {
       iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
     } else {
