@@ -832,13 +832,10 @@
 
     if (current.status === 'none') {
       dom.btnClockIn.classList.add('recommended');
-      dom.btnClockOut.setAttribute('disabled', 'true');
     } else if (current.status === 'working') {
       dom.btnClockOut.classList.add('recommended');
-      dom.btnClockIn.setAttribute('disabled', 'true');
     } else if (current.status === 'left') {
       dom.btnClockIn.classList.add('recommended');
-      dom.btnClockOut.setAttribute('disabled', 'true');
     }
   }
 
