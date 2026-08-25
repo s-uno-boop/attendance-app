@@ -829,6 +829,8 @@
     dom.btnClockOut.classList.remove('recommended');
     dom.btnClockIn.removeAttribute('disabled');
     dom.btnClockOut.removeAttribute('disabled');
+    dom.btnClockIn.disabled = false;
+    dom.btnClockOut.disabled = false;
 
     if (current.status === 'none') {
       dom.btnClockIn.classList.add('recommended');
