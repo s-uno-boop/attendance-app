@@ -1,7 +1,7 @@
 /**
  * TimeFlow - 出退勤管理Webアプリケーション
  * Core Logic & Data Persistence
- * （Google Apps Script / スプレッドシート連携・休憩60分控除・管理者アクセス制御版）
+ * （Google Apps Script / スプレッドシート完全双方向同期・スタッフマスター共有・打刻修正削除連携・休憩60分控除）
  */
 
 (function () {
@@ -16,10 +16,12 @@
   const STORAGE_LAST_USER_KEY = 'timeflow_last_user_name_v1';
   const STORAGE_GAS_URL_KEY = 'timeflow_gas_api_url_v1';
   const STORAGE_SHEET_URL_KEY = 'timeflow_gas_sheet_url_v1';
-  const STORAGE_PENDING_QUEUE_KEY = 'timeflow_pending_gas_queue_v1';
 
+  // デフォルト設定定数（どの端末から開いても初期状態で利用）
   const DEFAULT_PIN = '1234';
-  const DEFAULT_STAFF = ['山田 太郎', '佐藤 花子', '鈴木 一郎'];
+  const DEFAULT_STAFF = ['門上 紀子'];
+  const DEFAULT_GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzU2ggc9AUGzg63r5jUW-J2DYmO_77Yke9QXoPYUd4Yv5MEaFj5MVpOxHYzLK6MRRJz/exec';
+  const DEFAULT_GAS_SHEET_URL = '';
 
   const TYPE_CONFIG = {
     clock_in: {
@@ -46,9 +48,9 @@
   let records = [];
   let staffList = [];
   let adminPin = DEFAULT_PIN;
-  let gasApiUrl = '';
-  let gasSheetUrl = '';
-  let pendingQueue = [];
+  let gasApiUrl = DEFAULT_GAS_API_URL;
+  let gasSheetUrl = DEFAULT_GAS_SHEET_URL;
+  let isSyncing = false;
   let pendingModalAction = null;
 
   // ==========================================
@@ -214,15 +216,20 @@
       if (!Array.isArray(records)) records = [];
 
       const staffData = localStorage.getItem(STORAGE_STAFF_KEY);
-      staffList = staffData ? JSON.parse(staffData) : [...DEFAULT_STAFF];
-      if (!Array.isArray(staffList)) staffList = [...DEFAULT_STAFF];
+      if (staffData) {
+        staffList = JSON.parse(staffData);
+        if (!Array.isArray(staffList) || staffList.length === 0) {
+          staffList = [...DEFAULT_STAFF];
+        }
+      } else {
+        staffList = [...DEFAULT_STAFF];
+      }
 
       adminPin = localStorage.getItem(STORAGE_ADMIN_PIN_KEY) || DEFAULT_PIN;
-      gasApiUrl = localStorage.getItem(STORAGE_GAS_URL_KEY) || '';
-      gasSheetUrl = localStorage.getItem(STORAGE_SHEET_URL_KEY) || '';
-
-      const queueData = localStorage.getItem(STORAGE_PENDING_QUEUE_KEY);
-      pendingQueue = queueData ? JSON.parse(queueData) : [];
+      
+      // GAS URL: 未保存端末でも初期定数を自動適用（全端末クラウド連携）
+      gasApiUrl = localStorage.getItem(STORAGE_GAS_URL_KEY) || DEFAULT_GAS_API_URL;
+      gasSheetUrl = localStorage.getItem(STORAGE_SHEET_URL_KEY) || DEFAULT_GAS_SHEET_URL;
 
       const lastUser = localStorage.getItem(STORAGE_LAST_USER_KEY);
       if (lastUser && dom.userName) {
@@ -239,6 +246,7 @@
       console.error('LocalStorage load error:', e);
       records = [];
       staffList = [...DEFAULT_STAFF];
+      gasApiUrl = DEFAULT_GAS_API_URL;
     }
   }
 
@@ -320,10 +328,67 @@
   }
 
   /**
+   * スプレッドシートから最新データ（スタッフマスタ・全打刻履歴）を完全同期取得
+   */
+  async function fetchFromGas(silent = false) {
+    if (!gasApiUrl) return;
+
+    if (!silent) updateCloudStatusUI('syncing');
+    isSyncing = true;
+
+    try {
+      const response = await fetch(gasApiUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data && data.status === 'success') {
+        // 1. スタッフマスタの完全同期（スプレッドシート側を正として上書き）
+        if (Array.isArray(data.staffList) && data.staffList.length > 0) {
+          staffList = [...data.staffList];
+          saveStaffList();
+        }
+
+        // 2. 打刻レコードの完全同期（スプレッドシート側を正として上書き）
+        if (Array.isArray(data.records)) {
+          records = [...data.records].sort((a, b) => a.timestamp - b.timestamp);
+          saveRecords();
+        }
+
+        // UI最新化
+        updateStaffUI();
+        updateStatusUI();
+        updateSummary();
+        renderGeneralRecords();
+        renderAdminRecords();
+
+        updateCloudStatusUI();
+        if (!silent) {
+          showToast('☁ スプレッドシートから最新データを同期しました', 'success');
+        }
+      }
+    } catch (err) {
+      console.warn('Fetch from GAS failed (running with local cache):', err);
+      updateCloudStatusUI();
+      if (!silent) {
+        showToast('スプレッドシートからのデータ取得に失敗しました（ローカルデータで動作中）', 'warning');
+      }
+    } finally {
+      isSyncing = false;
+    }
+  }
+
+  /**
    * 単一レコードをGoogle Apps ScriptへPOST送信
    */
   async function syncRecordToGas(record, workTimeString = '') {
-    if (!gasApiUrl) return; // GAS未設定時はローカルのみで動作
+    if (!gasApiUrl) return;
 
     updateCloudStatusUI('syncing');
 
@@ -341,21 +406,39 @@
     };
 
     try {
-      // CORS preflightを避けるため text/plain でPOST
       await fetch(gasApiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify(payload),
-        mode: 'no-cors' // GASのエンドポイント向け
+        mode: 'no-cors'
       });
 
       updateCloudStatusUI();
-      // no-corsではレスポンス内容は読めないが正常到達
       console.log('Record synced to Google Sheet successfully');
     } catch (err) {
       console.error('GAS sync error:', err);
       updateCloudStatusUI();
       showToast('☁ スプレッドシートへの送信に失敗しました（ローカルには保存済）', 'warning');
+    }
+  }
+
+  /**
+   * 管理者用：レコードの変更/削除/スタッフ変更のGAS非同期POST送信
+   */
+  async function postToGas(payload) {
+    if (!gasApiUrl) return;
+    try {
+      updateCloudStatusUI('syncing');
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors'
+      });
+      updateCloudStatusUI();
+    } catch (err) {
+      console.error('postToGas error:', err);
+      updateCloudStatusUI();
     }
   }
 
@@ -367,52 +450,60 @@
       showToast('先に「GAS Web API URL」を設定・保存してください', 'warning');
       return;
     }
-    if (records.length === 0) {
-      showToast('同期する打刻データがありません', 'info');
-      return;
-    }
 
     updateCloudStatusUI('syncing');
-    showToast('Googleスプレッドシートへ全データを送信中...', 'info');
+    showToast('Googleスプレッドシートと双方向同期を実行中...', 'info');
 
-    const workTimeMap = computeRecordWorkTimes();
-    const sorted = [...records].sort((a, b) => a.timestamp - b.timestamp);
+    // 1. ローカルの全レコードをスプレッドシートへ送信
+    if (records.length > 0) {
+      const workTimeMap = computeRecordWorkTimes();
+      const sorted = [...records].sort((a, b) => a.timestamp - b.timestamp);
 
-    const payloadRecords = sorted.map(r => {
-      const wt = workTimeMap[r.id];
-      return {
-        id: r.id,
-        userName: r.userName,
-        dateStr: r.dateStr,
-        timeStr: r.timeStr,
-        type: r.type,
-        typeLabel: r.typeLabel,
-        note: r.note || '',
-        workTime: wt ? wt.text : '',
-        timestamp: r.timestamp
-      };
-    });
-
-    const payload = {
-      action: 'bulk_sync',
-      records: payloadRecords
-    };
-
-    try {
-      await fetch(gasApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-        mode: 'no-cors'
+      const payloadRecords = sorted.map(r => {
+        const wt = workTimeMap[r.id];
+        return {
+          id: r.id,
+          userName: r.userName,
+          dateStr: r.dateStr,
+          timeStr: r.timeStr,
+          type: r.type,
+          typeLabel: r.typeLabel,
+          note: r.note || '',
+          workTime: wt ? wt.text : '',
+          timestamp: r.timestamp
+        };
       });
 
-      updateCloudStatusUI();
-      showToast(`☁ 全 ${records.length}件のデータをスプレッドシートに同期しました！`, 'success');
-    } catch (err) {
-      console.error('Bulk sync error:', err);
-      updateCloudStatusUI();
-      showToast('スプレッドシートへの一括送信に失敗しました', 'error');
+      try {
+        await fetch(gasApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'bulk_sync', records: payloadRecords }),
+          mode: 'no-cors'
+        });
+      } catch (err) {
+        console.error('Bulk sync upload error:', err);
+      }
     }
+
+    // 2. スタッフマスターも送信
+    if (staffList.length > 0) {
+      try {
+        await fetch(gasApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'save_staff', staffList: staffList }),
+          mode: 'no-cors'
+        });
+      } catch (err) {
+        console.error('Staff sync error:', err);
+      }
+    }
+
+    // 3. スプレッドシートから最新データを再取得してリフレッシュ
+    await fetchFromGas(true);
+    updateCloudStatusUI();
+    showToast(`☁ スプレッドシートとの同期が完了しました！（全 ${records.length}件）`, 'success');
   }
 
   /**
@@ -425,16 +516,24 @@
       return;
     }
 
-    showToast('接続テストを実行中...', 'info');
+    showToast('接続テスト＆データ同期を実行中...', 'info');
 
     try {
-      // 接続テスト用GETまたはPOST
-      await fetch(url, {
+      const res = await fetch(url, {
         method: 'GET',
-        mode: 'no-cors'
+        headers: { 'Accept': 'application/json' }
       });
 
-      showToast('✅ Google Apps Script URL への接続を確認しました！', 'success');
+      if (res.ok) {
+        const json = await res.json();
+        showToast('✅ Google Apps Script への双方向接続を確認しました！', 'success');
+        if (json && Array.isArray(json.records)) {
+          fetchFromGas(false);
+        }
+      } else {
+        await fetch(url, { method: 'GET', mode: 'no-cors' });
+        showToast('✅ Google Apps Script URL への接続を確認しました！', 'success');
+      }
     } catch (err) {
       console.error('GAS connection test error:', err);
       showToast('⚠️ 接続に失敗しました。URLとデプロイ設定（アクセス権: 全員）をご確認ください', 'error');
@@ -447,7 +546,7 @@
 
   function updateStaffUI() {
     const recordNames = records.map(r => (r.userName || '').trim()).filter(Boolean);
-    const allNames = Array.from(new Set([...staffList, ...recordNames])).sort();
+    const allNames = Array.from(new Set([...DEFAULT_STAFF, ...staffList, ...recordNames])).sort();
 
     if (dom.userNameList) {
       dom.userNameList.innerHTML = allNames
@@ -512,6 +611,9 @@
     saveStaffList();
     updateStaffUI();
     dom.staffNameInput.value = '';
+    
+    // スプレッドシート側にもスタッフマスターを同期保存
+    postToGas({ action: 'save_staff', staffList: staffList });
     showToast(`スタッフ「${trimmed}」を追加しました`, 'success');
   }
 
@@ -523,6 +625,7 @@
         staffList = staffList.filter(s => s !== name);
         saveStaffList();
         updateStaffUI();
+        postToGas({ action: 'save_staff', staffList: staffList });
         showToast(`スタッフ「${name}」を削除しました`, 'info');
       }
     );
@@ -681,7 +784,7 @@
     if (!config) return;
 
     const rawUserName = dom.userName.value.trim();
-    const userName = rawUserName || (staffList[0] || '山田 太郎');
+    const userName = rawUserName || (staffList[0] || DEFAULT_STAFF[0]);
     const noteValue = dom.punchNote.value.trim();
     const now = new Date();
 
@@ -703,6 +806,7 @@
     if (userName && !staffList.includes(userName)) {
       staffList.push(userName);
       saveStaffList();
+      postToGas({ action: 'save_staff', staffList: staffList });
     }
 
     dom.punchNote.value = '';
@@ -718,10 +822,10 @@
     const wt = workTimeMap[record.id];
     const workTimeString = wt ? wt.text : '';
 
-    // クラウド（Googleスプレッドシート）へ自動非同期送信
+    // クラウド（Googleスプレッドシート）へ自動送信
     syncRecordToGas(record, workTimeString);
 
-    const cloudMsg = gasApiUrl ? '（☁ スプレッドシート連携）' : '';
+    const cloudMsg = gasApiUrl ? '（☁ スプレッドシート連携中）' : '';
     showToast(`【${userName}様】${config.toastMsg}${cloudMsg}`, config.toastClass);
   }
 
@@ -907,7 +1011,7 @@
 
   function openManualAddModal() {
     const now = new Date();
-    dom.addUserName.value = dom.adminFilterUser.value !== 'all' ? dom.adminFilterUser.value : (staffList[0] || '');
+    dom.addUserName.value = dom.adminFilterUser.value !== 'all' ? dom.adminFilterUser.value : (staffList[0] || DEFAULT_STAFF[0]);
     dom.addDate.value = formatDate(now);
     dom.addTime.value = formatTime(now, true);
     dom.addType.value = 'clock_in';
@@ -918,7 +1022,7 @@
   }
 
   function saveManualAddRecord() {
-    const userName = dom.addUserName.value.trim() || '山田 太郎';
+    const userName = dom.addUserName.value.trim() || DEFAULT_STAFF[0];
     const dateStr = dom.addDate.value.trim();
     const timeStr = dom.addTime.value.trim();
     const type = dom.addType.value;
@@ -966,6 +1070,7 @@
     if (userName && !staffList.includes(userName)) {
       staffList.push(userName);
       saveStaffList();
+      postToGas({ action: 'save_staff', staffList: staffList });
     }
 
     updateStaffUI();
@@ -1011,6 +1116,11 @@
     const target = records.find(r => r.id === id);
     if (!target) return;
 
+    const oldTimestamp = target.timestamp;
+    const oldUserName = target.userName;
+    const oldDateStr = target.dateStr;
+    const oldTimeStr = target.timeStr;
+
     const newName = dom.editUserName.value.trim() || '未設定';
     const newDateStr = dom.editDate.value.trim();
     const newTimeStr = dom.editTime.value.trim();
@@ -1054,7 +1164,24 @@
 
     const workTimeMap = computeRecordWorkTimes();
     const wt = workTimeMap[target.id];
-    syncRecordToGas(target, wt ? wt.text : '');
+    const wtStr = wt ? wt.text : '';
+
+    // スプレッドシート側の行も完全同期更新
+    postToGas({
+      action: 'update_record',
+      oldTimestamp: oldTimestamp,
+      oldUserName: oldUserName,
+      oldDateStr: oldDateStr,
+      oldTimeStr: oldTimeStr,
+      timestamp: newTimestamp,
+      userName: newName,
+      dateStr: newDateStr,
+      timeStr: newTimeStr,
+      type: newType,
+      typeLabel: target.typeLabel,
+      note: finalNote,
+      workTime: wtStr
+    });
 
     dom.editRecordModal.classList.add('hidden');
     showToast('打刻データを修正しました（[管理者修正] タグ付与）', 'success');
@@ -1080,6 +1207,16 @@
         updateSummary();
         renderGeneralRecords();
         renderAdminRecords();
+
+        // スプレッドシート側も削除
+        postToGas({
+          action: 'delete_record',
+          timestamp: target.timestamp,
+          userName: target.userName,
+          dateStr: target.dateStr,
+          timeStr: target.timeStr
+        });
+
         showToast('記録を1件削除しました', 'info');
       }
     );
@@ -1102,6 +1239,9 @@
         updateSummary();
         renderGeneralRecords();
         renderAdminRecords();
+
+        // スプレッドシート側も全件クリア
+        postToGas({ action: 'clear_all' });
         showToast('すべての打刻記録をリセットしました', 'info');
       }
     );
@@ -1172,25 +1312,22 @@
     const d2 = new Date(today.getTime() - 2 * 86400000);
     const d2Str = formatDate(d2);
     sampleList.push(
-      { id: generateId(), userName: '山田 太郎', timestamp: new Date(d2.getFullYear(), d2.getMonth(), d2.getDate(), 9, 0, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d2Str, timeStr: '09:00:00', note: '定時出勤' },
-      { id: generateId(), userName: '山田 太郎', timestamp: new Date(d2.getFullYear(), d2.getMonth(), d2.getDate(), 18, 0, 0).getTime(), type: 'clock_out', typeLabel: '退勤', dateStr: d2Str, timeStr: '18:00:00', note: '業務終了' },
-      { id: generateId(), userName: '佐藤 花子', timestamp: new Date(d2.getFullYear(), d2.getMonth(), d2.getDate(), 8, 30, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d2Str, timeStr: '08:30:00', note: 'リモート' },
-      { id: generateId(), userName: '佐藤 花子', timestamp: new Date(d2.getFullYear(), d2.getMonth(), d2.getDate(), 17, 30, 0).getTime(), type: 'clock_out', typeLabel: '退勤', dateStr: d2Str, timeStr: '17:30:00', note: '' }
+      { id: generateId(), userName: '門上 紀子', timestamp: new Date(d2.getFullYear(), d2.getMonth(), d2.getDate(), 9, 0, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d2Str, timeStr: '09:00:00', note: '定時出勤' },
+      { id: generateId(), userName: '門上 紀子', timestamp: new Date(d2.getFullYear(), d2.getMonth(), d2.getDate(), 18, 0, 0).getTime(), type: 'clock_out', typeLabel: '退勤', dateStr: d2Str, timeStr: '18:00:00', note: '業務終了' }
     );
 
     // 1日前: 09:00〜18:30 (実働 8時間 30分)
     const d1 = new Date(today.getTime() - 1 * 86400000);
     const d1Str = formatDate(d1);
     sampleList.push(
-      { id: generateId(), userName: '山田 太郎', timestamp: new Date(d1.getFullYear(), d1.getMonth(), d1.getDate(), 9, 0, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d1Str, timeStr: '09:00:00', note: '[管理者修正] 直行対応' },
-      { id: generateId(), userName: '山田 太郎', timestamp: new Date(d1.getFullYear(), d1.getMonth(), d1.getDate(), 18, 30, 0).getTime(), type: 'clock_out', typeLabel: '退勤', dateStr: d1Str, timeStr: '18:30:00', note: '' }
+      { id: generateId(), userName: '門上 紀子', timestamp: new Date(d1.getFullYear(), d1.getMonth(), d1.getDate(), 9, 0, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d1Str, timeStr: '09:00:00', note: '[管理者修正] 直行対応' },
+      { id: generateId(), userName: '門上 紀子', timestamp: new Date(d1.getFullYear(), d1.getMonth(), d1.getDate(), 18, 30, 0).getTime(), type: 'clock_out', typeLabel: '退勤', dateStr: d1Str, timeStr: '18:30:00', note: '' }
     );
 
     // 本日: 09:00出勤
     const d0Str = formatDate(today);
     sampleList.push(
-      { id: generateId(), userName: '山田 太郎', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 9, 0, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d0Str, timeStr: '09:00:00', note: '出社' },
-      { id: generateId(), userName: '佐藤 花子', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 9, 15, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d0Str, timeStr: '09:15:00', note: '' }
+      { id: generateId(), userName: '門上 紀子', timestamp: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 9, 0, 0).getTime(), type: 'clock_in', typeLabel: '出勤', dateStr: d0Str, timeStr: '09:00:00', note: '出社' }
     );
 
     records = [...sampleList, ...records];
@@ -1237,6 +1374,8 @@
     if (dom.gasApiUrlInput) dom.gasApiUrlInput.value = gasApiUrl;
     if (dom.gasSheetUrlInput) dom.gasSheetUrlInput.value = gasSheetUrl;
     dom.adminPanelModal.classList.remove('hidden');
+    // パネルオープン時に最新同期を実行
+    fetchFromGas(true);
   }
 
   function closeAdminPanel() {
@@ -1322,6 +1461,22 @@
   // ==========================================
 
   function initEventListeners() {
+    // 0. クラウドステータスバッジのクリックで手動最新データ再取得
+    if (dom.cloudStatusBadge) {
+      dom.cloudStatusBadge.style.cursor = 'pointer';
+      dom.cloudStatusBadge.setAttribute('title', 'クリックで最新データをスプレッドシートから再同期');
+      dom.cloudStatusBadge.addEventListener('click', () => {
+        if (!isSyncing) fetchFromGas(false);
+      });
+    }
+
+    // タブ復帰時（画面再表示時）の自動再同期
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && gasApiUrl) {
+        fetchFromGas(true);
+      }
+    });
+
     // 1. 一般打刻画面イベント
     dom.btnClockIn.addEventListener('click', () => handlePunch('clock_in'));
     dom.btnClockOut.addEventListener('click', () => handlePunch('clock_out'));
@@ -1399,6 +1554,7 @@
     dom.btnSaveGas.addEventListener('click', () => {
       saveGasConfig(dom.gasApiUrlInput.value, dom.gasSheetUrlInput.value);
       showToast('Google Apps Script連携設定を保存しました', 'success');
+      fetchFromGas(false);
     });
     dom.btnTestGas.addEventListener('click', testGasConnection);
     dom.btnSyncAllGas.addEventListener('click', syncAllRecordsToGas);
@@ -1471,6 +1627,11 @@
     updateStatusUI();
     updateSummary();
     renderGeneralRecords();
+
+    // 起動時にスプレッドシートから最新データを完全同期取得（全端末同期）
+    if (gasApiUrl) {
+      fetchFromGas(true);
+    }
   }
 
   if (document.readyState === 'loading') {
