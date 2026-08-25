@@ -68,7 +68,6 @@
     statusDot: document.getElementById('status-dot'),
     currentStatusText: document.getElementById('current-status-text'),
     userName: document.getElementById('user-name'),
-    userNameList: document.getElementById('user-name-list'),
     punchNote: document.getElementById('punch-note'),
 
     // 打刻ボタン
@@ -226,17 +225,8 @@
       }
 
       adminPin = localStorage.getItem(STORAGE_ADMIN_PIN_KEY) || DEFAULT_PIN;
-      
-      // GAS URL: 未保存端末でも初期定数を自動適用（全端末クラウド連携）
       gasApiUrl = localStorage.getItem(STORAGE_GAS_URL_KEY) || DEFAULT_GAS_API_URL;
       gasSheetUrl = localStorage.getItem(STORAGE_SHEET_URL_KEY) || DEFAULT_GAS_SHEET_URL;
-
-      const lastUser = localStorage.getItem(STORAGE_LAST_USER_KEY);
-      if (lastUser && dom.userName && staffList.includes(lastUser)) {
-        dom.userName.value = lastUser;
-      } else if (staffList.length > 0 && dom.userName) {
-        dom.userName.value = staffList[0];
-      }
 
       // GAS設定欄に反映
       if (dom.gasApiUrlInput) dom.gasApiUrlInput.value = gasApiUrl;
@@ -318,7 +308,6 @@
       dom.cloudStatusText.textContent = 'クラウド連携中';
     }
 
-    // スプレッドシートリンクボタン
     if (dom.btnOpenSheet && gasSheetUrl) {
       dom.btnOpenSheet.href = gasSheetUrl;
       dom.btnOpenSheet.style.display = 'inline-flex';
@@ -370,15 +359,7 @@
           saveRecords();
         }
 
-        // お名前欄のチェック（もし現在の値がスタッフリストになければ先頭に）
-        if (dom.userName) {
-          const curVal = dom.userName.value.trim();
-          if (!curVal || !staffList.includes(curVal)) {
-            if (staffList.length > 0) dom.userName.value = staffList[0];
-          }
-        }
-
-        // 全UIを最新データで再描画（プルダウン、状態、サマリー、打刻ログ）
+        // 全UIを最新データで即座に再描画（名前プルダウン、出退勤ステータス、サマリー、打刻ログ）
         updateStaffUI();
         updateStatusUI();
         updateSummary();
@@ -572,21 +553,56 @@
   }
 
   // ==========================================
-  // スタッフ選択肢 & フィルターの更新（スタッフマスタを唯一の正とする）
+  // スタッフ選択肢 & ドロップダウンの即時再描画（スタッフマスタを唯一の正とする）
   // ==========================================
 
   function updateStaffUI() {
-    // スタッフマスタ（staffList）に登録されている名前のみを選択肢とする（過去ログの強制マージを排除）
     const validStaffNames = Array.from(new Set(staffList.map(s => String(s).trim()).filter(Boolean)));
+    const lastSavedUser = localStorage.getItem(STORAGE_LAST_USER_KEY) || '';
 
-    // 1. 打刻画面のお名前入力候補 datalist の更新
-    if (dom.userNameList) {
-      dom.userNameList.innerHTML = validStaffNames
-        .map(name => `<option value="${escapeHtml(name)}">`)
-        .join('');
+    // 1. メイン打刻画面の名前ドロップダウン（<select id="user-name">）
+    if (dom.userName) {
+      const curSelected = dom.userName.value;
+      if (validStaffNames.length === 0) {
+        dom.userName.innerHTML = '<option value="">(スタッフ未登録)</option>';
+      } else {
+        dom.userName.innerHTML = validStaffNames
+          .map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+          .join('');
+
+        if (curSelected && validStaffNames.includes(curSelected)) {
+          dom.userName.value = curSelected;
+        } else if (lastSavedUser && validStaffNames.includes(lastSavedUser)) {
+          dom.userName.value = lastSavedUser;
+        } else {
+          dom.userName.value = validStaffNames[0];
+        }
+      }
     }
 
-    // 2. 一般画面：名前フィルター
+    // 2. 管理者手動追加モーダルのスタッフ選択
+    if (dom.addUserName) {
+      const curAdd = dom.addUserName.value;
+      dom.addUserName.innerHTML = validStaffNames
+        .map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+        .join('');
+      if (curAdd && validStaffNames.includes(curAdd)) {
+        dom.addUserName.value = curAdd;
+      }
+    }
+
+    // 3. 管理者個別編集モーダルのスタッフ選択
+    if (dom.editUserName) {
+      const curEdit = dom.editUserName.value;
+      dom.editUserName.innerHTML = validStaffNames
+        .map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+        .join('');
+      if (curEdit && validStaffNames.includes(curEdit)) {
+        dom.editUserName.value = curEdit;
+      }
+    }
+
+    // 4. 一般画面：名前フィルター
     if (dom.filterUser) {
       const selected = dom.filterUser.value;
       let opts = '<option value="all">全員</option>';
@@ -597,7 +613,7 @@
       dom.filterUser.innerHTML = opts;
     }
 
-    // 3. 管理者画面：名前フィルター
+    // 5. 管理者画面：名前フィルター
     if (dom.adminFilterUser) {
       const selected = dom.adminFilterUser.value;
       let opts = '<option value="all">全員</option>';
@@ -608,7 +624,7 @@
       dom.adminFilterUser.innerHTML = opts;
     }
 
-    // 4. 管理者パネル：スタッフチップ一覧
+    // 6. 管理者パネル：スタッフチップ一覧
     if (dom.staffChipsWrap) {
       if (validStaffNames.length === 0) {
         dom.staffChipsWrap.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">登録スタッフがいません</span>';
@@ -646,7 +662,7 @@
     staffList.push(trimmed);
     saveStaffList();
     
-    // 即座にメイン打刻画面のプルダウン・管理者画面のチップを再描画
+    // 即座にメイン打刻画面のドロップダウン・管理者画面のチップを再描画
     updateStaffUI();
     dom.staffNameInput.value = '';
 
@@ -663,16 +679,10 @@
         staffList = staffList.filter(s => s !== name);
         saveStaffList();
 
-        // もしメイン画面のお名前欄に削除した名前が入っていれば変更
-        if (dom.userName && dom.userName.value.trim() === name) {
-          dom.userName.value = staffList.length > 0 ? staffList[0] : '';
-          saveLastUserName(dom.userName.value);
-          updateStatusUI();
-          updateSummary();
-        }
-
-        // 即座にメイン打刻画面のプルダウン・管理者画面のチップを再描画
+        // メイン画面のドロップダウンやチップを即座に再描画
         updateStaffUI();
+        updateStatusUI();
+        updateSummary();
 
         // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存
         postToGas({ action: 'save_staff', staffList: staffList });
@@ -862,7 +872,6 @@
 
     dom.punchNote.value = '';
 
-    updateStaffUI();
     updateStatusUI();
     updateSummary();
     renderGeneralRecords();
@@ -1062,6 +1071,7 @@
 
   function openManualAddModal() {
     const now = new Date();
+    updateStaffUI();
     dom.addUserName.value = dom.adminFilterUser.value !== 'all' ? dom.adminFilterUser.value : (staffList[0] || DEFAULT_STAFF[0]);
     dom.addDate.value = formatDate(now);
     dom.addTime.value = formatTime(now, true);
@@ -1069,7 +1079,6 @@
     dom.addNote.value = '';
 
     dom.manualAddModal.classList.remove('hidden');
-    setTimeout(() => dom.addUserName.focus(), 50);
   }
 
   function saveManualAddRecord() {
@@ -1125,7 +1134,6 @@
       postToGas({ action: 'save_staff', staffList: staffList });
     }
 
-    updateStaffUI();
     updateStatusUI();
     updateSummary();
     renderGeneralRecords();
@@ -1147,8 +1155,9 @@
     const target = records.find(r => r.id === id);
     if (!target) return;
 
+    updateStaffUI();
     dom.editRecordId.value = target.id;
-    dom.editUserName.value = target.userName || '';
+    dom.editUserName.value = target.userName || (staffList[0] || '');
     dom.editDate.value = target.dateStr || '';
     dom.editTime.value = target.timeStr || '';
     dom.editType.value = target.type || 'clock_in';
@@ -1160,7 +1169,6 @@
     dom.editNote.value = cleanNote;
 
     dom.editRecordModal.classList.remove('hidden');
-    setTimeout(() => dom.editNote.focus(), 50);
   }
 
   function saveEditedRecord() {
@@ -1208,7 +1216,6 @@
     target.timestamp = newTimestamp;
 
     saveRecords();
-    updateStaffUI();
     updateStatusUI();
     updateSummary();
     renderGeneralRecords();
@@ -1254,7 +1261,6 @@
       () => {
         records = records.filter(r => r.id !== id);
         saveRecords();
-        updateStaffUI();
         updateStatusUI();
         updateSummary();
         renderGeneralRecords();
@@ -1286,7 +1292,6 @@
       () => {
         records = [];
         saveRecords();
-        updateStaffUI();
         updateStatusUI();
         updateSummary();
         renderGeneralRecords();
@@ -1428,12 +1433,12 @@
     if (dom.gasApiUrlInput) dom.gasApiUrlInput.value = gasApiUrl;
     if (dom.gasSheetUrlInput) dom.gasSheetUrlInput.value = gasSheetUrl;
     dom.adminPanelModal.classList.remove('hidden');
-    // パネルオープン時に最新設定・打刻データを自動同期
     fetchFromGas(true);
   }
 
   function closeAdminPanel() {
     dom.adminPanelModal.classList.add('hidden');
+    updateStaffUI();
     renderGeneralRecords();
   }
 
@@ -1540,7 +1545,8 @@
     dom.btnClockIn.addEventListener('click', () => handlePunch('clock_in'));
     dom.btnClockOut.addEventListener('click', () => handlePunch('clock_out'));
 
-    dom.userName.addEventListener('input', () => {
+    // お名前ドロップダウン切り替え時にステータス・サマリーを即時更新
+    dom.userName.addEventListener('change', () => {
       saveLastUserName(dom.userName.value.trim());
       updateStatusUI();
       updateSummary();

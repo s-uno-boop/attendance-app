@@ -68,14 +68,13 @@
             <div id="digital-clock" class="digital-clock">00:00:00</div>
           </div>
 
-          <!-- 打刻時入力エリア（名前＆メモ） -->
+          <!-- 打刻時入力エリア（名前選択ドロップダウン＆メモ） -->
           <div class="punch-inputs-container">
             <div class="input-field-wrap">
               <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-              <input type="text" id="user-name" list="user-name-list" placeholder="お名前を入力または選択" maxlength="20" autocomplete="off">
-              <datalist id="user-name-list">
+              <select id="user-name" class="custom-select punch-user-select" title="お名前を選択">
                 <!-- JavaScriptで動的生成 -->
-              </datalist>
+              </select>
             </div>
             <div class="input-field-wrap">
               <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
@@ -496,7 +495,9 @@
       <div class="edit-form">
         <div class="form-group">
           <label for="add-user-name">スタッフ名:</label>
-          <input type="text" id="add-user-name" list="user-name-list" placeholder="氏名を選択または入力" maxlength="20">
+          <select id="add-user-name" class="custom-select" style="width: 100%;">
+            <!-- JavaScriptで動的生成 -->
+          </select>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -542,7 +543,9 @@
         <input type="hidden" id="edit-record-id">
         <div class="form-group">
           <label for="edit-user-name">名前:</label>
-          <input type="text" id="edit-user-name" maxlength="20">
+          <select id="edit-user-name" class="custom-select" style="width: 100%;">
+            <!-- JavaScriptで動的生成 -->
+          </select>
         </div>
         <div class="form-row">
           <div class="form-group">
