@@ -1,7 +1,7 @@
 /**
  * TimeFlow - 出退勤管理Webアプリケーション
  * Core Logic & Data Persistence
- * （Google Apps Script / スプレッドシート完全双方向同期・スタッフマスター共有・打刻修正削除連携・休憩60分控除）
+ * （Google Apps Script / スプレッドシート完全双方向同期・管理者PIN＆スタッフマスター一元管理・打刻修正削除連携・休憩60分控除）
  */
 
 (function () {
@@ -46,7 +46,7 @@
   // アプリ状態
   // ==========================================
   let records = [];
-  let staffList = [];
+  let staffList = [...DEFAULT_STAFF];
   let adminPin = DEFAULT_PIN;
   let gasApiUrl = DEFAULT_GAS_API_URL;
   let gasSheetUrl = DEFAULT_GAS_SHEET_URL;
@@ -206,7 +206,7 @@
   }
 
   // ==========================================
-  // LocalStorage 管理
+  // LocalStorage 管理（キャッシュ・初期化用）
   // ==========================================
 
   function loadData() {
@@ -232,7 +232,7 @@
       gasSheetUrl = localStorage.getItem(STORAGE_SHEET_URL_KEY) || DEFAULT_GAS_SHEET_URL;
 
       const lastUser = localStorage.getItem(STORAGE_LAST_USER_KEY);
-      if (lastUser && dom.userName) {
+      if (lastUser && dom.userName && staffList.includes(lastUser)) {
         dom.userName.value = lastUser;
       } else if (staffList.length > 0 && dom.userName) {
         dom.userName.value = staffList[0];
@@ -247,6 +247,7 @@
       records = [];
       staffList = [...DEFAULT_STAFF];
       gasApiUrl = DEFAULT_GAS_API_URL;
+      adminPin = DEFAULT_PIN;
     }
   }
 
@@ -255,7 +256,6 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
     } catch (e) {
       console.error('LocalStorage save error:', e);
-      showToast('ローカルデータの保存に失敗しました', 'error');
     }
   }
 
@@ -328,7 +328,7 @@
   }
 
   /**
-   * スプレッドシートから最新データ（スタッフマスタ・全打刻履歴）を完全同期取得
+   * スプレッドシートから最新データ（管理者PIN・スタッフマスタ・全打刻履歴）を完全同期取得
    */
   async function fetchFromGas(silent = false) {
     if (!gasApiUrl) return;
@@ -349,19 +349,36 @@
       const data = await response.json();
 
       if (data && data.status === 'success') {
-        // 1. スタッフマスタの完全同期（スプレッドシート側を正として上書き）
+        // 1. 管理者PINの同期（スプレッドシート側設定を正として適用）
+        if (data.adminPin) {
+          const cloudPin = String(data.adminPin).trim();
+          if (cloudPin) {
+            adminPin = cloudPin;
+            saveAdminPin(cloudPin);
+          }
+        }
+
+        // 2. スタッフマスタの完全同期（スプレッドシート側「スタッフマスタ」を唯一の正として上書き）
         if (Array.isArray(data.staffList) && data.staffList.length > 0) {
-          staffList = [...data.staffList];
+          staffList = data.staffList.map(s => String(s).trim()).filter(Boolean);
           saveStaffList();
         }
 
-        // 2. 打刻レコードの完全同期（スプレッドシート側を正として上書き）
+        // 3. 打刻レコードの完全同期（スプレッドシート側を正として上書き）
         if (Array.isArray(data.records)) {
           records = [...data.records].sort((a, b) => a.timestamp - b.timestamp);
           saveRecords();
         }
 
-        // UI最新化
+        // お名前欄のチェック（もし現在の値がスタッフリストになければ先頭に）
+        if (dom.userName) {
+          const curVal = dom.userName.value.trim();
+          if (!curVal || !staffList.includes(curVal)) {
+            if (staffList.length > 0) dom.userName.value = staffList[0];
+          }
+        }
+
+        // 全UIを最新データで再描画（プルダウン、状態、サマリー、打刻ログ）
         updateStaffUI();
         updateStatusUI();
         updateSummary();
@@ -370,7 +387,7 @@
 
         updateCloudStatusUI();
         if (!silent) {
-          showToast('☁ スプレッドシートから最新データを同期しました', 'success');
+          showToast('☁ スプレッドシートから最新設定・データを同期しました', 'success');
         }
       }
     } catch (err) {
@@ -423,7 +440,7 @@
   }
 
   /**
-   * 管理者用：レコードの変更/削除/スタッフ変更のGAS非同期POST送信
+   * 管理者用：レコードの変更/削除/スタッフ変更/PIN変更のGAS非同期POST送信
    */
   async function postToGas(payload) {
     if (!gasApiUrl) return;
@@ -500,7 +517,21 @@
       }
     }
 
-    // 3. スプレッドシートから最新データを再取得してリフレッシュ
+    // 3. 管理者PINも送信
+    if (adminPin) {
+      try {
+        await fetch(gasApiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'change_pin', pin: adminPin }),
+          mode: 'no-cors'
+        });
+      } catch (err) {
+        console.error('PIN sync error:', err);
+      }
+    }
+
+    // 4. スプレッドシートから最新データを再取得してリフレッシュ
     await fetchFromGas(true);
     updateCloudStatusUI();
     showToast(`☁ スプレッドシートとの同期が完了しました！（全 ${records.length}件）`, 'success');
@@ -541,44 +572,48 @@
   }
 
   // ==========================================
-  // スタッフ選択肢 & フィルターの更新
+  // スタッフ選択肢 & フィルターの更新（スタッフマスタを唯一の正とする）
   // ==========================================
 
   function updateStaffUI() {
-    const recordNames = records.map(r => (r.userName || '').trim()).filter(Boolean);
-    const allNames = Array.from(new Set([...DEFAULT_STAFF, ...staffList, ...recordNames])).sort();
+    // スタッフマスタ（staffList）に登録されている名前のみを選択肢とする（過去ログの強制マージを排除）
+    const validStaffNames = Array.from(new Set(staffList.map(s => String(s).trim()).filter(Boolean)));
 
+    // 1. 打刻画面のお名前入力候補 datalist の更新
     if (dom.userNameList) {
-      dom.userNameList.innerHTML = allNames
+      dom.userNameList.innerHTML = validStaffNames
         .map(name => `<option value="${escapeHtml(name)}">`)
         .join('');
     }
 
+    // 2. 一般画面：名前フィルター
     if (dom.filterUser) {
       const selected = dom.filterUser.value;
       let opts = '<option value="all">全員</option>';
-      allNames.forEach(name => {
+      validStaffNames.forEach(name => {
         const isSel = (name === selected) ? 'selected' : '';
         opts += `<option value="${escapeHtml(name)}" ${isSel}>${escapeHtml(name)}</option>`;
       });
       dom.filterUser.innerHTML = opts;
     }
 
+    // 3. 管理者画面：名前フィルター
     if (dom.adminFilterUser) {
       const selected = dom.adminFilterUser.value;
       let opts = '<option value="all">全員</option>';
-      allNames.forEach(name => {
+      validStaffNames.forEach(name => {
         const isSel = (name === selected) ? 'selected' : '';
         opts += `<option value="${escapeHtml(name)}" ${isSel}>${escapeHtml(name)}</option>`;
       });
       dom.adminFilterUser.innerHTML = opts;
     }
 
+    // 4. 管理者パネル：スタッフチップ一覧
     if (dom.staffChipsWrap) {
-      if (staffList.length === 0) {
+      if (validStaffNames.length === 0) {
         dom.staffChipsWrap.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">登録スタッフがいません</span>';
       } else {
-        dom.staffChipsWrap.innerHTML = staffList.map(name => `
+        dom.staffChipsWrap.innerHTML = validStaffNames.map(name => `
           <div class="staff-chip">
             <span>${escapeHtml(name)}</span>
             <button class="btn-remove-staff" data-name="${escapeHtml(name)}" title="このスタッフを削除">
@@ -607,14 +642,17 @@
       showToast('そのスタッフ名は既に登録されています', 'warning');
       return;
     }
+
     staffList.push(trimmed);
     saveStaffList();
+    
+    // 即座にメイン打刻画面のプルダウン・管理者画面のチップを再描画
     updateStaffUI();
     dom.staffNameInput.value = '';
-    
-    // スプレッドシート側にもスタッフマスターを同期保存
+
+    // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存
     postToGas({ action: 'save_staff', staffList: staffList });
-    showToast(`スタッフ「${trimmed}」を追加しました`, 'success');
+    showToast(`スタッフ「${trimmed}」を追加しました（☁ クラウド同期済）`, 'success');
   }
 
   function removeStaff(name) {
@@ -624,9 +662,21 @@
       () => {
         staffList = staffList.filter(s => s !== name);
         saveStaffList();
+
+        // もしメイン画面のお名前欄に削除した名前が入っていれば変更
+        if (dom.userName && dom.userName.value.trim() === name) {
+          dom.userName.value = staffList.length > 0 ? staffList[0] : '';
+          saveLastUserName(dom.userName.value);
+          updateStatusUI();
+          updateSummary();
+        }
+
+        // 即座にメイン打刻画面のプルダウン・管理者画面のチップを再描画
         updateStaffUI();
+
+        // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存
         postToGas({ action: 'save_staff', staffList: staffList });
-        showToast(`スタッフ「${name}」を削除しました`, 'info');
+        showToast(`スタッフ「${name}」を削除しました（☁ クラウド同期済）`, 'info');
       }
     );
   }
@@ -806,6 +856,7 @@
     if (userName && !staffList.includes(userName)) {
       staffList.push(userName);
       saveStaffList();
+      updateStaffUI();
       postToGas({ action: 'save_staff', staffList: staffList });
     }
 
@@ -1070,6 +1121,7 @@
     if (userName && !staffList.includes(userName)) {
       staffList.push(userName);
       saveStaffList();
+      updateStaffUI();
       postToGas({ action: 'save_staff', staffList: staffList });
     }
 
@@ -1349,6 +1401,8 @@
     dom.adminPinInput.value = '';
     dom.adminLoginError.classList.add('hidden');
     dom.adminLoginModal.classList.remove('hidden');
+    // 開いたタイミングでスプレッドシートから最新PINをサイレント取得
+    fetchFromGas(true);
     setTimeout(() => dom.adminPinInput.focus(), 50);
   }
 
@@ -1374,7 +1428,7 @@
     if (dom.gasApiUrlInput) dom.gasApiUrlInput.value = gasApiUrl;
     if (dom.gasSheetUrlInput) dom.gasSheetUrlInput.value = gasSheetUrl;
     dom.adminPanelModal.classList.remove('hidden');
-    // パネルオープン時に最新同期を実行
+    // パネルオープン時に最新設定・打刻データを自動同期
     fetchFromGas(true);
   }
 
@@ -1401,11 +1455,16 @@
       return;
     }
 
+    adminPin = newPin;
     saveAdminPin(newPin);
+    
+    // スプレッドシート側の「設定」シートにも即時保存
+    postToGas({ action: 'change_pin', pin: newPin });
+
     dom.currentPinInput.value = '';
     dom.newPinInput.value = '';
     dom.confirmPinInput.value = '';
-    showToast('管理者PINコードを変更しました', 'success');
+    showToast('管理者PINコードを変更しました（☁ スプレッドシートに保存済）', 'success');
   }
 
   // ==========================================
@@ -1628,7 +1687,7 @@
     updateSummary();
     renderGeneralRecords();
 
-    // 起動時にスプレッドシートから最新データを完全同期取得（全端末同期）
+    // 起動時にスプレッドシートから最新設定（PIN・スタッフ・打刻）を完全同期取得
     if (gasApiUrl) {
       fetchFromGas(true);
     }
