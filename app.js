@@ -79,14 +79,6 @@
     summaryClockOut: document.getElementById('summary-clock-out'),
     summaryWorkTime: document.getElementById('summary-work-time'),
 
-    // 一般画面：履歴テーブル
-    recordsCountBadge: document.getElementById('records-count-badge'),
-    recordsTbody: document.getElementById('records-tbody'),
-    emptyState: document.getElementById('empty-state'),
-    filterUser: document.getElementById('filter-user'),
-    filterPeriod: document.getElementById('filter-period'),
-    filterType: document.getElementById('filter-type'),
-
     // 管理者ログインモーダル
     btnOpenAdminLogin: document.getElementById('btn-open-admin-login'),
     adminLoginModal: document.getElementById('admin-login-modal'),
@@ -357,11 +349,10 @@
           saveLocalRecords();
         }
 
-        // 全UIをクラウドの最新状態で即時再描画（ドロップダウン、ステータス、サマリー、ログ）
+        // 全UIをクラウドの最新状態で即時再描画（ドロップダウン、ステータス、サマリー）
         updateStaffUI();
         updateStatusUI();
         updateSummary();
-        renderGeneralRecords();
         renderAdminRecords();
 
         updateCloudStatusUI();
@@ -581,18 +572,7 @@
       }
     }
 
-    // 4. 一般画面：名前フィルター
-    if (dom.filterUser) {
-      const selected = dom.filterUser.value;
-      let opts = '<option value="all">全員</option>';
-      validStaffNames.forEach(name => {
-        const isSel = (name === selected) ? 'selected' : '';
-        opts += `<option value="${escapeHtml(name)}" ${isSel}>${escapeHtml(name)}</option>`;
-      });
-      dom.filterUser.innerHTML = opts;
-    }
-
-    // 5. 管理者画面：名前フィルター
+    // 4. 管理者画面：名前フィルター
     if (dom.adminFilterUser) {
       const selected = dom.adminFilterUser.value;
       let opts = '<option value="all">全員</option>';
@@ -603,7 +583,7 @@
       dom.adminFilterUser.innerHTML = opts;
     }
 
-    // 6. 管理者パネル：スタッフチップ一覧
+    // 5. 管理者パネル：スタッフチップ一覧
     if (dom.staffChipsWrap) {
       if (validStaffNames.length === 0) {
         dom.staffChipsWrap.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">登録スタッフがいません</span>';
@@ -973,7 +953,6 @@
 
     updateStatusUI();
     updateSummary();
-    renderGeneralRecords();
     renderAdminRecords();
 
     // 実労働時間の計算（退勤時）
@@ -989,10 +968,10 @@
   }
 
   // ==========================================
-  // 一般画面：記録テーブル描画（閲覧専用）
+  // レコードフィルターユーティリティ
   // ==========================================
 
-  function getFilteredRecords(userFilter, periodFilter, typeFilter) {
+  function getFilteredRecords(userFilter, periodFilter, typeFilter = 'all') {
     const now = new Date();
     const todayStr = formatDate(now);
     const sevenDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime();
@@ -1016,64 +995,6 @@
       }
       return true;
     }).sort((a, b) => b.timestamp - a.timestamp);
-  }
-
-  function renderGeneralRecords() {
-    const userFilter = dom.filterUser ? dom.filterUser.value : 'all';
-    const periodFilter = dom.filterPeriod ? dom.filterPeriod.value : 'today';
-    const typeFilter = dom.filterType ? dom.filterType.value : 'all';
-
-    const filtered = getFilteredRecords(userFilter, periodFilter, typeFilter);
-    const workTimeMap = computeRecordWorkTimes();
-
-    dom.recordsCountBadge.textContent = `${filtered.length}件`;
-
-    if (filtered.length === 0) {
-      dom.recordsTbody.innerHTML = '';
-      dom.emptyState.classList.remove('hidden');
-      return;
-    }
-
-    dom.emptyState.classList.add('hidden');
-
-    const html = filtered.map(r => {
-      const config = TYPE_CONFIG[r.type] || {
-        label: r.typeLabel || r.type,
-        icon: '',
-        className: 'type-clock_in'
-      };
-
-      const wt = workTimeMap[r.id];
-      const workTimeDisplay = wt 
-        ? `<span class="worktime-col">${wt.text}</span>` 
-        : `<span class="worktime-col empty">-</span>`;
-
-      const isAdminModified = r.note && (r.note.includes('[管理者修正]') || r.note.includes('[管理者追加]'));
-      const cleanNote = r.note 
-        ? r.note.replace(/\[管理者修正\]/g, '').replace(/\[管理者追加\]/g, '').trim()
-        : '';
-      const tagHtml = isAdminModified ? '<span class="admin-tag">⚙ 修正</span>' : '';
-      const noteContent = (tagHtml + escapeHtml(cleanNote)) || '<span style="opacity: 0.35;">-</span>';
-
-      return `
-        <tr>
-          <td class="user-col">${escapeHtml(r.userName || '未設定')}</td>
-          <td class="date-col">${r.dateStr}</td>
-          <td class="time-col">${r.timeStr}</td>
-          <td>
-            <span class="type-tag ${config.className}">
-              ${config.icon}
-              ${config.label}
-            </span>
-          </td>
-          <td class="note-col ${r.note ? 'has-note' : ''}">${noteContent}</td>
-          <td>${workTimeDisplay}</td>
-          <td class="timestamp-col">${r.timestamp}</td>
-        </tr>
-      `;
-    }).join('');
-
-    dom.recordsTbody.innerHTML = html;
   }
 
   // ==========================================
@@ -1235,7 +1156,6 @@
 
     updateStatusUI();
     updateSummary();
-    renderGeneralRecords();
     renderAdminRecords();
 
     const workTimeMap = computeRecordWorkTimes();
@@ -1317,7 +1237,6 @@
     saveLocalRecords();
     updateStatusUI();
     updateSummary();
-    renderGeneralRecords();
     renderAdminRecords();
 
     const workTimeMap = computeRecordWorkTimes();
@@ -1362,7 +1281,6 @@
         saveLocalRecords();
         updateStatusUI();
         updateSummary();
-        renderGeneralRecords();
         renderAdminRecords();
 
         // スプレッドシート側も削除
@@ -1393,7 +1311,6 @@
         saveLocalRecords();
         updateStatusUI();
         updateSummary();
-        renderGeneralRecords();
         renderAdminRecords();
 
         // スプレッドシート側も全件クリア
@@ -1491,7 +1408,6 @@
     updateStaffUI();
     updateStatusUI();
     updateSummary();
-    renderGeneralRecords();
     renderAdminRecords();
 
     showToast('サンプルデータを追加しました', 'success');
@@ -1564,7 +1480,8 @@
   function closeAdminPanel() {
     dom.adminPanelModal.classList.add('hidden');
     updateStaffUI();
-    renderGeneralRecords();
+    updateStatusUI();
+    updateSummary();
   }
 
   // ==========================================
@@ -1656,10 +1573,6 @@
         }
       }
     });
-
-    if (dom.filterUser) dom.filterUser.addEventListener('change', renderGeneralRecords);
-    if (dom.filterPeriod) dom.filterPeriod.addEventListener('change', renderGeneralRecords);
-    if (dom.filterType) dom.filterType.addEventListener('change', renderGeneralRecords);
 
     // 2. 管理者ログイン認証
     dom.btnOpenAdminLogin.addEventListener('click', openAdminLogin);
@@ -1786,7 +1699,6 @@
     setInterval(updateClock, 1000);
     updateStatusUI();
     updateSummary();
-    renderGeneralRecords();
 
     // 起動時に必ずスプレッドシートから最新マスター（スタッフ一覧・PIN・打刻全件）を同期
     if (gasApiUrl) {
