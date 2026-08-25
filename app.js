@@ -381,7 +381,7 @@
   }
 
   /**
-   * GASへPOSTリクエスト送信
+   * GASへPOSTリクエスト送信（打刻送信と同じ形式で統一）
    */
   async function postToGas(payload) {
     if (!gasApiUrl) return;
@@ -431,31 +431,6 @@
   }
 
   /**
-   * スタッフリストをスプレッドシートへ即時同期 (updateStaffList)
-   */
-  async function syncStaffListToGas() {
-    if (!gasApiUrl) return;
-    updateCloudStatusUI('syncing');
-    try {
-      await fetch(gasApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'updateStaffList',
-          staffList: staffList
-        }),
-        mode: 'no-cors'
-      });
-      updateCloudStatusUI();
-      console.log('Staff list synced to Google Sheet successfully');
-    } catch (err) {
-      console.error('Staff list sync error:', err);
-      updateCloudStatusUI();
-      showToast('スタッフリストのクラウド保存に失敗しました', 'warning');
-    }
-  }
-
-  /**
    * 全ローカルレコードをスプレッドシートへ一括同期
    */
   async function syncAllRecordsToGas() {
@@ -492,7 +467,15 @@
 
     // 2. スタッフマスター送信
     if (staffList.length > 0) {
-      await syncStaffListToGas();
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'updateStaffList',
+          staffList: staffList
+        }),
+        mode: 'no-cors'
+      });
     }
 
     // 3. 管理者PIN送信
@@ -644,8 +627,11 @@
     }
   }
 
+  /**
+   * スタッフ追加処理（GAS即時POST送信 ＆ ボタンローディング制御）
+   */
   async function addStaff(name) {
-    const trimmed = name.trim();
+    const trimmed = (name || '').trim();
     if (!trimmed) {
       showToast('スタッフ名を入力してください', 'warning');
       return;
@@ -655,36 +641,153 @@
       return;
     }
 
-    staffList.push(trimmed);
-    saveLocalStaffList();
-    
-    // 即座にメイン打刻画面のドロップダウン・管理者画面のチップを再描画
-    updateStaffUI();
-    dom.staffNameInput.value = '';
+    const btn = dom.btnAddStaff;
+    const originalBtnHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading-spinner"></span> <span>保存中...</span>';
+    }
 
-    // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存 (updateStaffList)
-    await syncStaffListToGas();
-    showToast(`スタッフ「${trimmed}」を追加しました（☁ クラウド同期済）`, 'success');
+    updateCloudStatusUI('syncing');
+
+    try {
+      const newStaffList = [...staffList, trimmed];
+
+      // GASへ直接POST送信（打刻送信と同じ形式）
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'updateStaffList',
+          staffList: newStaffList
+        }),
+        mode: 'no-cors'
+      });
+
+      staffList = newStaffList;
+      saveLocalStaffList();
+
+      // UI（スタッフマスタ一覧 ＆ 打刻画面プルダウン）を即時再描画
+      updateStaffUI();
+      if (dom.staffNameInput) dom.staffNameInput.value = '';
+
+      updateCloudStatusUI();
+      showToast(`スタッフ「${trimmed}」を登録しました（☁ スプレッドシート同期済）`, 'success');
+    } catch (err) {
+      console.error('addStaff error:', err);
+      updateCloudStatusUI();
+      showToast('スタッフのクラウド保存に失敗しました', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalBtnHtml;
+      }
+    }
   }
 
-  async function removeStaff(name) {
+  /**
+   * スタッフ削除処理（GAS即時POST送信）
+   */
+  function removeStaff(name) {
     showConfirmModal(
       'スタッフの削除',
       `スタッフ「${name}」をリストから削除しますか？\n（※過去の打刻記録は保持されます）`,
       async () => {
-        staffList = staffList.filter(s => s !== name);
-        saveLocalStaffList();
+        updateCloudStatusUI('syncing');
+        try {
+          const newStaffList = staffList.filter(s => s !== name);
 
-        // メイン画面のドロップダウンやチップを即座に再描画
-        updateStaffUI();
-        updateStatusUI();
-        updateSummary();
+          // GASへ直接POST送信（打刻送信と同じ形式）
+          await fetch(gasApiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'updateStaffList',
+              staffList: newStaffList
+            }),
+            mode: 'no-cors'
+          });
 
-        // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存 (updateStaffList)
-        await syncStaffListToGas();
-        showToast(`スタッフ「${name}」を削除しました（☁ クラウド同期済）`, 'info');
+          staffList = newStaffList;
+          saveLocalStaffList();
+
+          // UI再描画
+          updateStaffUI();
+          updateStatusUI();
+          updateSummary();
+
+          updateCloudStatusUI();
+          showToast(`スタッフ「${name}」を削除しました（☁ スプレッドシート同期済）`, 'info');
+        } catch (err) {
+          console.error('removeStaff error:', err);
+          updateCloudStatusUI();
+          showToast('スタッフ削除のクラウド同期に失敗しました', 'error');
+        }
       }
     );
+  }
+
+  /**
+   * PIN変更処理（GAS即時POST送信 ＆ ボタンローディング制御）
+   */
+  async function handlePinChange() {
+    const curPin = dom.currentPinInput.value.trim();
+    const newPin = dom.newPinInput.value.trim();
+    const confPin = dom.confirmPinInput.value.trim();
+
+    if (curPin !== adminPin) {
+      showToast('現在のPINコードが正しくありません', 'error');
+      return;
+    }
+    if (newPin.length < 4 || newPin.length > 8) {
+      showToast('新しいPINは4〜8文字で設定してください', 'warning');
+      return;
+    }
+    if (newPin !== confPin) {
+      showToast('新しいPINコード（確認）が一致しません', 'error');
+      return;
+    }
+
+    const btn = dom.btnChangePin;
+    const originalBtnHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading-spinner"></span> <span>保存中...</span>';
+    }
+
+    updateCloudStatusUI('syncing');
+
+    try {
+      // GASへ updatePin POSTリクエスト送信（打刻送信と同じ形式）
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'updatePin',
+          newPin: newPin
+        }),
+        mode: 'no-cors'
+      });
+
+      adminPin = newPin;
+      saveLocalAdminPin(newPin);
+
+      dom.currentPinInput.value = '';
+      dom.newPinInput.value = '';
+      dom.confirmPinInput.value = '';
+
+      updateCloudStatusUI();
+      showToast('管理者PINコードを変更しました（☁ スプレッドシート「システム設定」に保存済）', 'success');
+    } catch (err) {
+      console.error('PIN update error:', err);
+      updateCloudStatusUI();
+      showToast('PIN変更のクラウド送信に失敗しました', 'error');
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = originalBtnHtml;
+      }
+    }
   }
 
   // ==========================================
@@ -863,7 +966,7 @@
       staffList.push(userName);
       saveLocalStaffList();
       updateStaffUI();
-      syncStaffListToGas();
+      postToGas({ action: 'updateStaffList', staffList: staffList });
     }
 
     dom.punchNote.value = '';
@@ -1127,7 +1230,7 @@
       staffList.push(userName);
       saveLocalStaffList();
       updateStaffUI();
-      syncStaffListToGas();
+      postToGas({ action: 'updateStaffList', staffList: staffList });
     }
 
     updateStatusUI();
@@ -1402,7 +1505,6 @@
     dom.adminPinInput.value = '';
     dom.adminLoginError.classList.add('hidden');
     dom.adminLoginModal.classList.remove('hidden');
-    // 開いたタイミングでスプレッドシートから最新PIN・スタッフをサイレント取得
     fetchInitialData(true);
     setTimeout(() => dom.adminPinInput.focus(), 50);
   }
@@ -1465,56 +1567,6 @@
     renderGeneralRecords();
   }
 
-  /**
-   * PIN変更時のクラウド同期 (updatePin)
-   */
-  async function handlePinChange() {
-    const curPin = dom.currentPinInput.value.trim();
-    const newPin = dom.newPinInput.value.trim();
-    const confPin = dom.confirmPinInput.value.trim();
-
-    if (curPin !== adminPin) {
-      showToast('現在のPINコードが正しくありません', 'error');
-      return;
-    }
-    if (newPin.length < 4 || newPin.length > 8) {
-      showToast('新しいPINは4〜8文字で設定してください', 'warning');
-      return;
-    }
-    if (newPin !== confPin) {
-      showToast('新しいPINコード（確認）が一致しません', 'error');
-      return;
-    }
-
-    updateCloudStatusUI('syncing');
-
-    try {
-      // GASへ updatePin POSTリクエスト送信
-      await fetch(gasApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'updatePin',
-          newPin: newPin
-        }),
-        mode: 'no-cors'
-      });
-
-      adminPin = newPin;
-      saveLocalAdminPin(newPin);
-      updateCloudStatusUI();
-
-      dom.currentPinInput.value = '';
-      dom.newPinInput.value = '';
-      dom.confirmPinInput.value = '';
-      showToast('管理者PINコードを変更しました（☁ スプレッドシート「システム設定」に保存済）', 'success');
-    } catch (err) {
-      console.error('PIN update error:', err);
-      updateCloudStatusUI();
-      showToast('PIN変更のクラウド送信に失敗しました', 'error');
-    }
-  }
-
   // ==========================================
   // トースト通知 & 確認モーダル
   // ==========================================
@@ -1528,7 +1580,7 @@
     if (type === 'success' || type === 'toast-success') {
       iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
     } else if (type === 'warning' || type === 'toast-warning') {
-      iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+      iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
     } else if (type === 'error' || type === 'toast-error') {
       iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
     } else {
@@ -1649,13 +1701,13 @@
     dom.editCancelBtn.addEventListener('click', () => dom.editRecordModal.classList.add('hidden'));
     dom.editSaveBtn.addEventListener('click', saveEditedRecord);
 
-    // スタッフ管理
+    // スタッフ管理：ボタンクリック & Enterキー
     dom.btnAddStaff.addEventListener('click', () => addStaff(dom.staffNameInput.value));
     dom.staffNameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') addStaff(dom.staffNameInput.value);
     });
 
-    // PIN変更
+    // PIN変更：更新ボタン
     dom.btnChangePin.addEventListener('click', handlePinChange);
 
     // Google連携設定
