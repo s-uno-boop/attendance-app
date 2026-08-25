@@ -17,7 +17,7 @@
   const STORAGE_GAS_URL_KEY = 'timeflow_gas_api_url_v1';
   const STORAGE_SHEET_URL_KEY = 'timeflow_gas_sheet_url_v1';
 
-  // デフォルト設定定数（初回アクセス・未接続時のフォールバック用）
+  // デフォルト設定定数（LocalStorageが空の端末でも必ずこのURLと通信）
   const DEFAULT_PIN = '1234';
   const DEFAULT_STAFF = ['門上 紀子'];
   const DEFAULT_GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzU2ggc9AUGzg63r5jUW-J2DYmO_77Yke9QXoPYUd4Yv5MEaFj5MVpOxHYzLK6MRRJz/exec';
@@ -51,7 +51,6 @@
   let gasApiUrl = DEFAULT_GAS_API_URL;
   let gasSheetUrl = DEFAULT_GAS_SHEET_URL;
   let isSyncing = false;
-  let isCloudDataLoaded = false;
   let pendingModalAction = null;
 
   // ==========================================
@@ -315,7 +314,7 @@
   }
 
   /**
-   * 起動時・更新時にGASから最新データ（スタッフ一覧・管理者PIN・打刻全件）を一括完全取得
+   * 起動時・更新時にGASから最新データ（スタッフ一覧・管理者PIN・打刻全件）を一括完全取得 (getInitialData)
    */
   async function fetchInitialData(silent = false) {
     if (!gasApiUrl) return;
@@ -337,8 +336,6 @@
       const data = await response.json();
 
       if (data && data.status === 'success') {
-        isCloudDataLoaded = true;
-
         // 1. 管理者PIN（スプレッドシート「システム設定」シートが正）
         if (data.adminPin) {
           const cloudPin = String(data.adminPin).trim();
@@ -360,7 +357,7 @@
           saveLocalRecords();
         }
 
-        // 全UIをクラウドの最新状態で即時再描画
+        // 全UIをクラウドの最新状態で即時再描画（ドロップダウン、ステータス、サマリー、ログ）
         updateStaffUI();
         updateStatusUI();
         updateSummary();
@@ -475,7 +472,7 @@
 
     // 3. 管理者PIN送信
     if (adminPin) {
-      await postToGas({ action: 'verifyOrUpdatePin', mode: 'update', newPin: adminPin });
+      await postToGas({ action: 'updatePin', pin: adminPin, newPin: adminPin });
     }
 
     // 4. 最新データを再取得
@@ -632,7 +629,7 @@
     updateStaffUI();
     dom.staffNameInput.value = '';
 
-    // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存
+    // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存 (updateStaffList)
     postToGas({ action: 'updateStaffList', staffList: staffList });
     showToast(`スタッフ「${trimmed}」を追加しました（☁ クラウド同期済）`, 'success');
   }
@@ -650,7 +647,7 @@
         updateStatusUI();
         updateSummary();
 
-        // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存
+        // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存 (updateStaffList)
         postToGas({ action: 'updateStaffList', staffList: staffList });
         showToast(`スタッフ「${name}」を削除しました（☁ クラウド同期済）`, 'info');
       }
@@ -1456,8 +1453,8 @@
     adminPin = newPin;
     saveLocalAdminPin(newPin);
     
-    // スプレッドシート側の「システム設定」シートへ即時上書き保存
-    postToGas({ action: 'verifyOrUpdatePin', mode: 'update', newPin: newPin });
+    // スプレッドシート側の「システム設定」シートへ即時上書き保存 (updatePin)
+    postToGas({ action: 'updatePin', pin: newPin, newPin: newPin });
 
     dom.currentPinInput.value = '';
     dom.newPinInput.value = '';
@@ -1478,7 +1475,7 @@
     if (type === 'success' || type === 'toast-success') {
       iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
     } else if (type === 'warning' || type === 'toast-warning') {
-      iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+      iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
     } else if (type === 'error' || type === 'toast-error') {
       iconSvg = '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
     } else {
