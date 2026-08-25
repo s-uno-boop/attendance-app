@@ -61,12 +61,10 @@
     cloudStatusBadge: document.getElementById('cloud-status-badge'),
     cloudStatusText: document.getElementById('cloud-status-text'),
 
-    // 日付・時計・ステータス
+    // 日付・時計
     currentDate: document.getElementById('current-date'),
     currentDay: document.getElementById('current-day'),
     digitalClock: document.getElementById('digital-clock'),
-    statusDot: document.getElementById('status-dot'),
-    currentStatusText: document.getElementById('current-status-text'),
     userName: document.getElementById('user-name'),
     punchNote: document.getElementById('punch-note'),
 
@@ -820,24 +818,15 @@
   }
 
   function updateStatusUI() {
-    const current = getCurrentStatus();
-
-    dom.currentStatusText.textContent = current.label;
-    dom.statusDot.className = `status-dot ${current.dotClass}`;
-
-    dom.btnClockIn.classList.remove('recommended');
-    dom.btnClockOut.classList.remove('recommended');
-    dom.btnClockIn.removeAttribute('disabled');
-    dom.btnClockOut.removeAttribute('disabled');
-    dom.btnClockIn.disabled = false;
-    dom.btnClockOut.disabled = false;
-
-    if (current.status === 'none') {
-      dom.btnClockIn.classList.add('recommended');
-    } else if (current.status === 'working') {
-      dom.btnClockOut.classList.add('recommended');
-    } else if (current.status === 'left') {
-      dom.btnClockIn.classList.add('recommended');
+    if (dom.btnClockIn) {
+      dom.btnClockIn.classList.remove('recommended');
+      dom.btnClockIn.removeAttribute('disabled');
+      dom.btnClockIn.disabled = false;
+    }
+    if (dom.btnClockOut) {
+      dom.btnClockOut.classList.remove('recommended');
+      dom.btnClockOut.removeAttribute('disabled');
+      dom.btnClockOut.disabled = false;
     }
   }
 

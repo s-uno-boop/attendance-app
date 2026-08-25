@@ -443,14 +443,14 @@ button {
 
 .clock-header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  justify-content: center;
+  align-items: center;
 }
 
 .current-date-box {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
 }
 
 .date-text {
@@ -468,53 +468,6 @@ button {
   border-radius: var(--radius-full);
   display: inline-block;
   width: fit-content;
-}
-
-/* Status Indicator */
-.status-indicator-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border-card);
-  padding: 6px 14px;
-  border-radius: var(--radius-full);
-}
-
-.status-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: var(--text-muted);
-  box-shadow: 0 0 8px currentColor;
-  transition: all var(--transition-fast);
-}
-
-.status-dot.status-off {
-  background-color: var(--text-muted);
-}
-
-.status-dot.status-working {
-  background-color: var(--color-in);
-  box-shadow: 0 0 10px var(--color-in);
-  animation: pulseDot 2s infinite;
-}
-
-.status-dot.status-left {
-  background-color: var(--color-out);
-  box-shadow: 0 0 8px var(--color-out);
-}
-
-@keyframes pulseDot {
-  0% { transform: scale(0.95); opacity: 0.8; }
-  50% { transform: scale(1.2); opacity: 1; }
-  100% { transform: scale(0.95); opacity: 0.8; }
-}
-
-.status-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
 }
 
 /* Digital Clock */
