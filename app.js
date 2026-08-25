@@ -1,7 +1,7 @@
 /**
  * TimeFlow - 出退勤管理Webアプリケーション
- * Core Logic & Data Persistence
- * （Google Apps Script / スプレッドシート完全双方向同期・管理者PIN＆スタッフマスター一元管理・打刻修正削除連携・休憩60分控除）
+ * Core Logic & Cloud Synchronization
+ * （Google Apps Script / スプレッドシート完全一元管理・クラウド認証・スタッフマスタ同期・休憩60分控除）
  */
 
 (function () {
@@ -17,7 +17,7 @@
   const STORAGE_GAS_URL_KEY = 'timeflow_gas_api_url_v1';
   const STORAGE_SHEET_URL_KEY = 'timeflow_gas_sheet_url_v1';
 
-  // デフォルト設定定数（どの端末から開いても初期状態で利用）
+  // デフォルト設定定数（初回アクセス・未接続時のフォールバック用）
   const DEFAULT_PIN = '1234';
   const DEFAULT_STAFF = ['門上 紀子'];
   const DEFAULT_GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzU2ggc9AUGzg63r5jUW-J2DYmO_77Yke9QXoPYUd4Yv5MEaFj5MVpOxHYzLK6MRRJz/exec';
@@ -43,7 +43,7 @@
   const DAYS_JA = ['日曜日', '月曜日', '火曜日', '水曜日', '木曜日', '金曜日', '土曜日'];
 
   // ==========================================
-  // アプリ状態
+  // アプリ状態（スプレッドシートが Single Source of Truth）
   // ==========================================
   let records = [];
   let staffList = [...DEFAULT_STAFF];
@@ -51,6 +51,7 @@
   let gasApiUrl = DEFAULT_GAS_API_URL;
   let gasSheetUrl = DEFAULT_GAS_SHEET_URL;
   let isSyncing = false;
+  let isCloudDataLoaded = false;
   let pendingModalAction = null;
 
   // ==========================================
@@ -205,10 +206,10 @@
   }
 
   // ==========================================
-  // LocalStorage 管理（キャッシュ・初期化用）
+  // キャッシュ・初期値ロード
   // ==========================================
 
-  function loadData() {
+  function loadLocalCache() {
     try {
       const recordData = localStorage.getItem(STORAGE_KEY);
       records = recordData ? JSON.parse(recordData) : [];
@@ -216,19 +217,16 @@
 
       const staffData = localStorage.getItem(STORAGE_STAFF_KEY);
       if (staffData) {
-        staffList = JSON.parse(staffData);
-        if (!Array.isArray(staffList) || staffList.length === 0) {
-          staffList = [...DEFAULT_STAFF];
+        const parsedStaff = JSON.parse(staffData);
+        if (Array.isArray(parsedStaff) && parsedStaff.length > 0) {
+          staffList = parsedStaff;
         }
-      } else {
-        staffList = [...DEFAULT_STAFF];
       }
 
       adminPin = localStorage.getItem(STORAGE_ADMIN_PIN_KEY) || DEFAULT_PIN;
       gasApiUrl = localStorage.getItem(STORAGE_GAS_URL_KEY) || DEFAULT_GAS_API_URL;
       gasSheetUrl = localStorage.getItem(STORAGE_SHEET_URL_KEY) || DEFAULT_GAS_SHEET_URL;
 
-      // GAS設定欄に反映
       if (dom.gasApiUrlInput) dom.gasApiUrlInput.value = gasApiUrl;
       if (dom.gasSheetUrlInput) dom.gasSheetUrlInput.value = gasSheetUrl;
       updateCloudStatusUI();
@@ -241,7 +239,7 @@
     }
   }
 
-  function saveRecords() {
+  function saveLocalRecords() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
     } catch (e) {
@@ -249,7 +247,7 @@
     }
   }
 
-  function saveStaffList() {
+  function saveLocalStaffList() {
     try {
       localStorage.setItem(STORAGE_STAFF_KEY, JSON.stringify(staffList));
     } catch (e) {
@@ -257,7 +255,7 @@
     }
   }
 
-  function saveAdminPin(pin) {
+  function saveLocalAdminPin(pin) {
     try {
       adminPin = pin;
       localStorage.setItem(STORAGE_ADMIN_PIN_KEY, pin);
@@ -287,7 +285,7 @@
   }
 
   // ==========================================
-  // Google Apps Script (GAS) クラウド同期ロジック
+  // Google Apps Script (GAS) クラウド同期・API
   // ==========================================
 
   function updateCloudStatusUI(status = null) {
@@ -317,16 +315,17 @@
   }
 
   /**
-   * スプレッドシートから最新データ（管理者PIN・スタッフマスタ・全打刻履歴）を完全同期取得
+   * 起動時・更新時にGASから最新データ（スタッフ一覧・管理者PIN・打刻全件）を一括完全取得
    */
-  async function fetchFromGas(silent = false) {
+  async function fetchInitialData(silent = false) {
     if (!gasApiUrl) return;
 
     if (!silent) updateCloudStatusUI('syncing');
     isSyncing = true;
 
     try {
-      const response = await fetch(gasApiUrl, {
+      const url = `${gasApiUrl}?action=getInitialData&_t=${Date.now()}`;
+      const response = await fetch(url, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
@@ -338,28 +337,30 @@
       const data = await response.json();
 
       if (data && data.status === 'success') {
-        // 1. 管理者PINの同期（スプレッドシート側設定を正として適用）
+        isCloudDataLoaded = true;
+
+        // 1. 管理者PIN（スプレッドシート「システム設定」シートが正）
         if (data.adminPin) {
           const cloudPin = String(data.adminPin).trim();
           if (cloudPin) {
             adminPin = cloudPin;
-            saveAdminPin(cloudPin);
+            saveLocalAdminPin(cloudPin);
           }
         }
 
-        // 2. スタッフマスタの完全同期（スプレッドシート側「スタッフマスタ」を唯一の正として上書き）
+        // 2. スタッフマスタ（スプレッドシート「スタッフマスタ」シートが正）
         if (Array.isArray(data.staffList) && data.staffList.length > 0) {
           staffList = data.staffList.map(s => String(s).trim()).filter(Boolean);
-          saveStaffList();
+          saveLocalStaffList();
         }
 
-        // 3. 打刻レコードの完全同期（スプレッドシート側を正として上書き）
+        // 3. 打刻レコード（スプレッドシート「打刻記録」シートが正）
         if (Array.isArray(data.records)) {
           records = [...data.records].sort((a, b) => a.timestamp - b.timestamp);
-          saveRecords();
+          saveLocalRecords();
         }
 
-        // 全UIを最新データで即座に再描画（名前プルダウン、出退勤ステータス、サマリー、打刻ログ）
+        // 全UIをクラウドの最新状態で即時再描画
         updateStaffUI();
         updateStatusUI();
         updateSummary();
@@ -379,6 +380,26 @@
       }
     } finally {
       isSyncing = false;
+    }
+  }
+
+  /**
+   * GASへPOSTリクエスト送信
+   */
+  async function postToGas(payload) {
+    if (!gasApiUrl) return;
+    try {
+      updateCloudStatusUI('syncing');
+      await fetch(gasApiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        mode: 'no-cors'
+      });
+      updateCloudStatusUI();
+    } catch (err) {
+      console.error('postToGas error:', err);
+      updateCloudStatusUI();
     }
   }
 
@@ -404,39 +425,11 @@
     };
 
     try {
-      await fetch(gasApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-        mode: 'no-cors'
-      });
-
-      updateCloudStatusUI();
+      await postToGas(payload);
       console.log('Record synced to Google Sheet successfully');
     } catch (err) {
       console.error('GAS sync error:', err);
-      updateCloudStatusUI();
-      showToast('☁ スプレッドシートへの送信に失敗しました（ローカルには保存済）', 'warning');
-    }
-  }
-
-  /**
-   * 管理者用：レコードの変更/削除/スタッフ変更/PIN変更のGAS非同期POST送信
-   */
-  async function postToGas(payload) {
-    if (!gasApiUrl) return;
-    try {
-      updateCloudStatusUI('syncing');
-      await fetch(gasApiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-        mode: 'no-cors'
-      });
-      updateCloudStatusUI();
-    } catch (err) {
-      console.error('postToGas error:', err);
-      updateCloudStatusUI();
+      showToast('☁ スプレッドシートへの送信に失敗しました', 'warning');
     }
   }
 
@@ -452,7 +445,7 @@
     updateCloudStatusUI('syncing');
     showToast('Googleスプレッドシートと双方向同期を実行中...', 'info');
 
-    // 1. ローカルの全レコードをスプレッドシートへ送信
+    // 1. 打刻レコード送信
     if (records.length > 0) {
       const workTimeMap = computeRecordWorkTimes();
       const sorted = [...records].sort((a, b) => a.timestamp - b.timestamp);
@@ -472,48 +465,21 @@
         };
       });
 
-      try {
-        await fetch(gasApiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'bulk_sync', records: payloadRecords }),
-          mode: 'no-cors'
-        });
-      } catch (err) {
-        console.error('Bulk sync upload error:', err);
-      }
+      await postToGas({ action: 'bulk_sync', records: payloadRecords });
     }
 
-    // 2. スタッフマスターも送信
+    // 2. スタッフマスター送信
     if (staffList.length > 0) {
-      try {
-        await fetch(gasApiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'save_staff', staffList: staffList }),
-          mode: 'no-cors'
-        });
-      } catch (err) {
-        console.error('Staff sync error:', err);
-      }
+      await postToGas({ action: 'updateStaffList', staffList: staffList });
     }
 
-    // 3. 管理者PINも送信
+    // 3. 管理者PIN送信
     if (adminPin) {
-      try {
-        await fetch(gasApiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'change_pin', pin: adminPin }),
-          mode: 'no-cors'
-        });
-      } catch (err) {
-        console.error('PIN sync error:', err);
-      }
+      await postToGas({ action: 'verifyOrUpdatePin', mode: 'update', newPin: adminPin });
     }
 
-    // 4. スプレッドシートから最新データを再取得してリフレッシュ
-    await fetchFromGas(true);
+    // 4. 最新データを再取得
+    await fetchInitialData(true);
     updateCloudStatusUI();
     showToast(`☁ スプレッドシートとの同期が完了しました！（全 ${records.length}件）`, 'success');
   }
@@ -531,7 +497,7 @@
     showToast('接続テスト＆データ同期を実行中...', 'info');
 
     try {
-      const res = await fetch(url, {
+      const res = await fetch(`${url}?action=getInitialData&_t=${Date.now()}`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
@@ -540,7 +506,7 @@
         const json = await res.json();
         showToast('✅ Google Apps Script への双方向接続を確認しました！', 'success');
         if (json && Array.isArray(json.records)) {
-          fetchFromGas(false);
+          fetchInitialData(false);
         }
       } else {
         await fetch(url, { method: 'GET', mode: 'no-cors' });
@@ -660,14 +626,14 @@
     }
 
     staffList.push(trimmed);
-    saveStaffList();
+    saveLocalStaffList();
     
     // 即座にメイン打刻画面のドロップダウン・管理者画面のチップを再描画
     updateStaffUI();
     dom.staffNameInput.value = '';
 
     // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存
-    postToGas({ action: 'save_staff', staffList: staffList });
+    postToGas({ action: 'updateStaffList', staffList: staffList });
     showToast(`スタッフ「${trimmed}」を追加しました（☁ クラウド同期済）`, 'success');
   }
 
@@ -677,7 +643,7 @@
       `スタッフ「${name}」をリストから削除しますか？\n（※過去の打刻記録は保持されます）`,
       () => {
         staffList = staffList.filter(s => s !== name);
-        saveStaffList();
+        saveLocalStaffList();
 
         // メイン画面のドロップダウンやチップを即座に再描画
         updateStaffUI();
@@ -685,7 +651,7 @@
         updateSummary();
 
         // スプレッドシート側の「スタッフマスタ」シートへ即時同期保存
-        postToGas({ action: 'save_staff', staffList: staffList });
+        postToGas({ action: 'updateStaffList', staffList: staffList });
         showToast(`スタッフ「${name}」を削除しました（☁ クラウド同期済）`, 'info');
       }
     );
@@ -860,14 +826,14 @@
     };
 
     records.push(record);
-    saveRecords();
+    saveLocalRecords();
     saveLastUserName(userName);
 
     if (userName && !staffList.includes(userName)) {
       staffList.push(userName);
-      saveStaffList();
+      saveLocalStaffList();
       updateStaffUI();
-      postToGas({ action: 'save_staff', staffList: staffList });
+      postToGas({ action: 'updateStaffList', staffList: staffList });
     }
 
     dom.punchNote.value = '';
@@ -1125,13 +1091,13 @@
     };
 
     records.push(record);
-    saveRecords();
+    saveLocalRecords();
 
     if (userName && !staffList.includes(userName)) {
       staffList.push(userName);
-      saveStaffList();
+      saveLocalStaffList();
       updateStaffUI();
-      postToGas({ action: 'save_staff', staffList: staffList });
+      postToGas({ action: 'updateStaffList', staffList: staffList });
     }
 
     updateStatusUI();
@@ -1215,7 +1181,7 @@
     target.note = finalNote;
     target.timestamp = newTimestamp;
 
-    saveRecords();
+    saveLocalRecords();
     updateStatusUI();
     updateSummary();
     renderGeneralRecords();
@@ -1260,7 +1226,7 @@
       `【${targetUser}】${target.dateStr} ${target.timeStr} の「${target.typeLabel}」を削除してもよろしいですか？`,
       () => {
         records = records.filter(r => r.id !== id);
-        saveRecords();
+        saveLocalRecords();
         updateStatusUI();
         updateSummary();
         renderGeneralRecords();
@@ -1291,7 +1257,7 @@
       'すべての打刻履歴（LocalStorage）を完全に消去します。この操作は取り消せません。本当によろしいですか？',
       () => {
         records = [];
-        saveRecords();
+        saveLocalRecords();
         updateStatusUI();
         updateSummary();
         renderGeneralRecords();
@@ -1388,7 +1354,7 @@
     );
 
     records = [...sampleList, ...records];
-    saveRecords();
+    saveLocalRecords();
     updateStaffUI();
     updateStatusUI();
     updateSummary();
@@ -1399,15 +1365,15 @@
   }
 
   // ==========================================
-  // 管理者認証 & パネル制御
+  // 管理者認証 & パネル制御（スプレッドシート照合）
   // ==========================================
 
   function openAdminLogin() {
     dom.adminPinInput.value = '';
     dom.adminLoginError.classList.add('hidden');
     dom.adminLoginModal.classList.remove('hidden');
-    // 開いたタイミングでスプレッドシートから最新PINをサイレント取得
-    fetchFromGas(true);
+    // 開いたタイミングでスプレッドシートから最新PIN・スタッフをサイレント取得
+    fetchInitialData(true);
     setTimeout(() => dom.adminPinInput.focus(), 50);
   }
 
@@ -1415,16 +1381,43 @@
     dom.adminLoginModal.classList.add('hidden');
   }
 
-  function handleAdminLogin() {
+  async function handleAdminLogin() {
     const inputPin = dom.adminPinInput.value.trim();
+    if (!inputPin) {
+      dom.adminLoginError.classList.remove('hidden');
+      return;
+    }
+
+    // 1. メモリ上のPINと照合
     if (inputPin === adminPin) {
       dom.adminLoginModal.classList.add('hidden');
       openAdminPanel();
       showToast('管理者としてログインしました', 'info');
-    } else {
-      dom.adminLoginError.classList.remove('hidden');
-      dom.adminPinInput.select();
+      return;
     }
+
+    // 2. もし不一致でも、GASへ直接検証リクエスト（スプレッドシート最新値と照合）
+    if (gasApiUrl) {
+      try {
+        const res = await fetch(`${gasApiUrl}?action=verifyPin&pin=${encodeURIComponent(inputPin)}&_t=${Date.now()}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.verified) {
+            adminPin = inputPin;
+            saveLocalAdminPin(inputPin);
+            dom.adminLoginModal.classList.add('hidden');
+            openAdminPanel();
+            showToast('管理者としてログインしました（☁ クラウド認証）', 'info');
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Direct PIN verification failed:', err);
+      }
+    }
+
+    dom.adminLoginError.classList.remove('hidden');
+    dom.adminPinInput.select();
   }
 
   function openAdminPanel() {
@@ -1433,7 +1426,7 @@
     if (dom.gasApiUrlInput) dom.gasApiUrlInput.value = gasApiUrl;
     if (dom.gasSheetUrlInput) dom.gasSheetUrlInput.value = gasSheetUrl;
     dom.adminPanelModal.classList.remove('hidden');
-    fetchFromGas(true);
+    fetchInitialData(true);
   }
 
   function closeAdminPanel() {
@@ -1461,15 +1454,15 @@
     }
 
     adminPin = newPin;
-    saveAdminPin(newPin);
+    saveLocalAdminPin(newPin);
     
-    // スプレッドシート側の「設定」シートにも即時保存
-    postToGas({ action: 'change_pin', pin: newPin });
+    // スプレッドシート側の「システム設定」シートへ即時上書き保存
+    postToGas({ action: 'verifyOrUpdatePin', mode: 'update', newPin: newPin });
 
     dom.currentPinInput.value = '';
     dom.newPinInput.value = '';
     dom.confirmPinInput.value = '';
-    showToast('管理者PINコードを変更しました（☁ スプレッドシートに保存済）', 'success');
+    showToast('管理者PINコードを変更しました（☁ スプレッドシート「システム設定」に保存済）', 'success');
   }
 
   // ==========================================
@@ -1530,14 +1523,14 @@
       dom.cloudStatusBadge.style.cursor = 'pointer';
       dom.cloudStatusBadge.setAttribute('title', 'クリックで最新データをスプレッドシートから再同期');
       dom.cloudStatusBadge.addEventListener('click', () => {
-        if (!isSyncing) fetchFromGas(false);
+        if (!isSyncing) fetchInitialData(false);
       });
     }
 
     // タブ復帰時（画面再表示時）の自動再同期
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && gasApiUrl) {
-        fetchFromGas(true);
+        fetchInitialData(true);
       }
     });
 
@@ -1619,7 +1612,7 @@
     dom.btnSaveGas.addEventListener('click', () => {
       saveGasConfig(dom.gasApiUrlInput.value, dom.gasSheetUrlInput.value);
       showToast('Google Apps Script連携設定を保存しました', 'success');
-      fetchFromGas(false);
+      fetchInitialData(false);
     });
     dom.btnTestGas.addEventListener('click', testGasConnection);
     dom.btnSyncAllGas.addEventListener('click', syncAllRecordsToGas);
@@ -1684,7 +1677,7 @@
   // ==========================================
 
   function init() {
-    loadData();
+    loadLocalCache();
     initEventListeners();
     updateStaffUI();
     updateClock();
@@ -1693,9 +1686,9 @@
     updateSummary();
     renderGeneralRecords();
 
-    // 起動時にスプレッドシートから最新設定（PIN・スタッフ・打刻）を完全同期取得
+    // 起動時に必ずスプレッドシートから最新マスター（スタッフ一覧・PIN・打刻全件）を同期
     if (gasApiUrl) {
-      fetchFromGas(true);
+      fetchInitialData(true);
     }
   }
 
